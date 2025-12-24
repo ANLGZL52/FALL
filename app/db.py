@@ -1,23 +1,37 @@
 # app/db.py
+from __future__ import annotations
+
 from pathlib import Path
-from sqlmodel import SQLModel, create_engine, Session
+from typing import Generator
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, Session
+
 from app.core.config import settings
+from app.models.base import Base  # Base burada olmalı (declarative_base)
 
-# db dosyası: <project_root>/storage/fall.db gibi olsun
-db_path = (settings.upload_base.parent / "fall.db").resolve()
-db_path.parent.mkdir(parents=True, exist_ok=True)
+# SQLite dosyasını storage içine koyuyoruz
+DB_PATH = (settings.storage_dir / "fall.db").resolve()
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-DATABASE_URL = f"sqlite:///{db_path.as_posix()}"
+DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 engine = create_engine(
     DATABASE_URL,
-    echo=False,                 # True yaparsan SQL loglarını görürsün
-    connect_args={"check_same_thread": False},  # FastAPI için gerekli
+    connect_args={"check_same_thread": False},  # sqlite için şart
+    future=True,
 )
 
-def create_db_and_tables() -> None:
-    SQLModel.metadata.create_all(engine)
+SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, future=True)
 
-def get_session():
-    with Session(engine) as session:
-        yield session
+
+def create_db_and_tables() -> None:
+    Base.metadata.create_all(bind=engine)
+
+
+def get_session() -> Generator[Session, None, None]:
+    db: Session = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

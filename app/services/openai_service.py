@@ -1,168 +1,248 @@
 # app/services/openai_service.py
+from __future__ import annotations
+
 import base64
 import json
-import os
-from typing import List, Dict, Any, Optional
+from typing import List, Tuple, Optional
 
 from openai import OpenAI
 from app.core.config import settings
 
 
-def _require_key() -> str:
-    if not settings.OPENAI_API_KEY:
-        raise RuntimeError(
-            "OPENAI_API_KEY env değişkeni boş. Key'i sisteme tanımla ve terminali yeniden aç."
-        )
-    return settings.OPENAI_API_KEY
-
-
-def _normalize_path(path: str) -> str:
-    """
-    DB'de path bazen relative (storage/uploads/..) bazen absolute olabilir.
-    - absolute ise direkt kullan
-    - relative ise proje köküne göre absolute'a çevir
-    """
-    if not path:
-        return path
-
-    # Windows / Linux uyumu
-    p = path.replace("\\", "/")
-
-    if os.path.isabs(p):
-        return p
-
-    # Proje kökü: .../app/services -> .../(project_root)
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    abs_path = os.path.abspath(os.path.join(project_root, p))
-    return abs_path
-
-
-def _to_data_url(path: str) -> str:
-    abs_path = _normalize_path(path)
-
-    if not os.path.exists(abs_path):
-        raise FileNotFoundError(f"Image not found: {abs_path} (from: {path})")
-
-    lower = abs_path.lower()
-    mime = "image/jpeg"
-    if lower.endswith(".png"):
-        mime = "image/png"
-    elif lower.endswith(".webp"):
-        mime = "image/webp"
-
-    with open(abs_path, "rb") as f:
-        b64 = base64.b64encode(f.read()).decode("utf-8")
+def _to_data_url(image_bytes: bytes, mime: str = "image/jpeg") -> str:
+    b64 = base64.b64encode(image_bytes).decode("utf-8")
     return f"data:{mime};base64,{b64}"
 
 
-def _safe_json_loads(text: str) -> Dict[str, Any]:
-    """
-    Model bazen JSON dışı metin ekleyebilir.
-    - Direkt parse dene
-    - Olmazsa: ilk '{' ile son '}' arasını kırpıp dene
-    """
-    text = (text or "").strip()
-    if not text:
-        return {}
+class OpenAIService:
+    def __init__(self):
+        api_key = (settings.openai_api_key or "").strip()
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY (.env) boş. Lütfen .env içine openai_api_key gir.")
+        self.client = OpenAI(api_key=api_key)
+        self.model = settings.openai_model
 
-    try:
-        return json.loads(text)
-    except Exception:
-        pass
+    def _guess_mime(self, filename: str | None) -> str:
+        if not filename:
+            return "image/jpeg"
+        f = filename.lower()
+        if f.endswith(".png"):
+            return "image/png"
+        if f.endswith(".webp"):
+            return "image/webp"
+        return "image/jpeg"
 
-    try:
-        i = text.find("{")
-        j = text.rfind("}")
-        if i >= 0 and j > i:
-            return json.loads(text[i : j + 1])
-    except Exception:
-        pass
+    # -----------------------------
+    # COFFEE VALIDATION + GENERATE
+    # -----------------------------
+    def validate_coffee_images(self, images: List[Tuple[bytes, str | None]]) -> dict:
+        """
+        Kahve fincanı/telve içeriyor mu? Basit doğrulama.
+        Return: {"ok": bool, "reason": str}
+        """
+        if not images:
+            return {"ok": False, "reason": "Görsel bulunamadı."}
 
-    return {}
+        # ilk görsel üzerinden kontrol yeterli
+        img_bytes, fname = images[0]
+        mime = self._guess_mime(fname)
+        data_url = _to_data_url(img_bytes, mime=mime)
 
+        prompt = """
+Sen bir doğrulama sistemisin.
+Görev: Verilen görsel kahve falı için uygun mu? (fincan/telve/çekilmiş kahve fincanı).
+- Uygun değilse: ok=false
+- Uygunsa: ok=true
+Yalnızca şu JSON'u döndür:
+{"ok": true/false, "reason": "kısa açıklama"}
+"""
 
-def validate_coffee_images(image_paths: List[str]) -> Dict[str, Any]:
-    """
-    Fotoğraflar kahve falı için uygun mu?
-    Return:
-      { "ok": bool, "reason": "..." }
-    """
-    _require_key()
-    client = OpenAI(api_key=settings.OPENAI_API_KEY)
-
-    images = [{"type": "input_image", "image_url": _to_data_url(p)} for p in image_paths[:5]]
-
-    prompt = (
-        "Sen bir içerik doğrulama asistanısın. Görev: Kullanıcının yüklediği görsellerin kahve falı için uygun olup olmadığını tespit et.\n"
-        "Uygun görsel örnekleri: kahve fincanı içi, telve izleri, tabak üzerindeki telve, fincanın üstten/yan/alt açıları.\n"
-        "Uygun olmayan örnekler: insan yüzü, manzara, evrak, ekran görüntüsü, yemek, ürün fotoğrafı vb.\n\n"
-        "Sadece JSON döndür. Şema:\n"
-        '{ "ok": true/false, "reason": "kısa açıklama" }\n'
-        "Eğer en az 1 görsel bile alakasızsa ok=false yap."
-    )
-
-    resp = client.responses.create(
-        model=settings.OPENAI_MODEL,
-        input=[
-            {
+        resp = self.client.responses.create(
+            model=self.model,
+            input=[{
                 "role": "user",
-                "content": [{"type": "input_text", "text": prompt}, *images],
-            }
-        ],
-    )
+                "content": [
+                    {"type": "input_text", "text": prompt.strip()},
+                    {"type": "input_image", "image_url": data_url},
+                ],
+            }],
+        )
 
-    text = (resp.output_text or "").strip()
-    data = _safe_json_loads(text)
+        text = (resp.output_text or "").strip()
+        if text.startswith("{") and text.endswith("}"):
+            try:
+                return json.loads(text)
+            except Exception:
+                pass
 
-    if not data:
-        return {"ok": False, "reason": f"Doğrulama yanıtı parse edilemedi: {text[:200]}"}
+        # fallback
+        lowered = text.lower()
+        if "ok" in lowered and "true" in lowered:
+            return {"ok": True, "reason": "Uygun görünüyor."}
+        return {"ok": False, "reason": "Görsel kahve falı için net değil. Fincanı/telveyi net çek."}
 
-    return {
-        "ok": bool(data.get("ok")),
-        "reason": str(data.get("reason", "")).strip(),
-    }
+    def generate_coffee_reading(
+        self,
+        images: List[Tuple[bytes, str | None]],
+        topic: str,
+        focus_text: str,
+        name: str | None,
+        age: int | None,
+    ) -> str:
+        who = f"İsim: {name}" if name else "İsim: (belirtilmedi)"
+        ag = f"Yaş: {age}" if age is not None else "Yaş: (belirtilmedi)"
+
+        system_style = """
+Sen "MysticAura" uygulamasının kahve falı yorumcususun.
+Türkçe yaz.
+Üslup: mistik, sıcak, güçlü betimlemeler; ama saçma iddialar yok.
+Çıktı formatı:
+1) Gördüğüm İşaretler (madde madde, kısa)
+2) Yorum (2-4 paragraf)
+3) Yakın Dönem (7-14 gün) (madde madde)
+4) Öneri & Denge (kısa)
+
+Kural: Eğer görseller kahve fincanı/telve değilse bunu dürüstçe söyle ve yeniden çekmesini iste.
+"""
+
+        user_prompt = f"""
+Kullanıcı kahve falı istiyor.
+Konu: {topic}
+Odak: {focus_text or "(boş)"}
+{who}
+{ag}
+"""
+
+        content = [{"type": "input_text", "text": system_style.strip() + "\n\n" + user_prompt.strip()}]
+
+        for (img_bytes, fname) in images:
+            mime = self._guess_mime(fname)
+            content.append({"type": "input_image", "image_url": _to_data_url(img_bytes, mime=mime)})
+
+        resp = self.client.responses.create(
+            model=self.model,
+            input=[{"role": "user", "content": content}],
+        )
+        return (resp.output_text or "").strip()
+
+    # -----------------------------
+    # HAND VALIDATION + GENERATE
+    # -----------------------------
+    def validate_hand_image(self, image_bytes: bytes, filename: str | None = None) -> dict:
+        """
+        Elden başka bir şey mi? -> ödeme öncesi kontrol.
+        Return: {"ok": bool, "reason": str}
+        """
+        mime = self._guess_mime(filename)
+        data_url = _to_data_url(image_bytes, mime=mime)
+
+        prompt = """
+Sen bir doğrulama sistemisin.
+Görev: Verilen görsel "insan eli/avuç içi" içeriyor mu? (El falı için).
+- Görselde baskın şekilde insan eli/avuç içi yoksa: ok=false
+- Varsa: ok=true
+Yalnızca şu JSON'u döndür:
+{"ok": true/false, "reason": "kısa açıklama"}
+"""
+
+        resp = self.client.responses.create(
+            model=self.model,
+            input=[{
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": prompt.strip()},
+                    {"type": "input_image", "image_url": data_url},
+                ],
+            }],
+        )
+
+        text = (resp.output_text or "").strip()
+        if text.startswith("{") and text.endswith("}"):
+            try:
+                return json.loads(text)
+            except Exception:
+                pass
+
+        lowered = text.lower()
+        if "true" in lowered and "ok" in lowered:
+            return {"ok": True, "reason": "El tespit edildi."}
+        return {"ok": False, "reason": "Görselde insan eli/avuç içi net değil. Lütfen sadece el fotoğrafı yükle."}
+
+    def generate_hand_reading(
+        self,
+        images: List[Tuple[bytes, str | None]],
+        topic: str,
+        focus_text: str,
+        name: str | None,
+        age: int | None,
+    ) -> str:
+        who = f"İsim: {name}" if name else "İsim: (belirtilmedi)"
+        ag = f"Yaş: {age}" if age is not None else "Yaş: (belirtilmedi)"
+
+        system_style = """
+Sen "MysticAura" uygulamasının el falı yorumcususun.
+Türkçe yaz.
+Üslup: mistik, sıcak, güçlü betimlemeler; ama saçma iddialar yok.
+Çıktı formatı:
+1) Gördüğüm İşaretler (madde madde, kısa)
+2) Yorum (2-4 paragraf)
+3) Yakın Dönem (7-14 gün) (madde madde)
+4) Öneri & Denge (kısa)
+
+Kural: Eğer görseller el değilse bunu dürüstçe söyle ve yeniden çekmesini iste.
+"""
+
+        user_prompt = f"""
+Kullanıcı el falı istiyor.
+Konu: {topic}
+Odak: {focus_text or "(boş)"}
+{who}
+{ag}
+"""
+
+        content = [{"type": "input_text", "text": system_style.strip() + "\n\n" + user_prompt.strip()}]
+        for (img_bytes, fname) in images:
+            mime = self._guess_mime(fname)
+            content.append({"type": "input_image", "image_url": _to_data_url(img_bytes, mime=mime)})
+
+        resp = self.client.responses.create(
+            model=self.model,
+            input=[{"role": "user", "content": content}],
+        )
+
+        return (resp.output_text or "").strip()
+
+
+# -------------------------------------------------------
+# Backward-compatible wrapper functions (IMPORT FIX)
+# routes_coffee.py eski importları patlatmasın diye
+# -------------------------------------------------------
+_ai_singleton: Optional[OpenAIService] = None
+
+
+def _ai() -> OpenAIService:
+    global _ai_singleton
+    if _ai_singleton is None:
+        _ai_singleton = OpenAIService()
+    return _ai_singleton
+
+
+def validate_coffee_images(images: List[Tuple[bytes, str | None]]) -> dict:
+    return _ai().validate_coffee_images(images)
 
 
 def generate_fortune(
-    name: str,
+    images: List[Tuple[bytes, str | None]],
     topic: str,
-    question: str,
-    image_paths: List[str],
-    relationship_status: Optional[str] = None,
-    big_decision: Optional[str] = None,
+    focus_text: str,
+    name: str | None,
+    age: int | None,
 ) -> str:
-    _require_key()
-    client = OpenAI(api_key=settings.OPENAI_API_KEY)
-
-    images = [{"type": "input_image", "image_url": _to_data_url(p)} for p in image_paths[:5]]
-
-    system = (
-        "Sen deneyimli bir kahve falcısısın. Üslup: sıcak, mistik, ama abartısız; "
-        "kullanıcıya umut verirken gerçekçi ve nazik ol. "
-        "Kesin hüküm verme; olasılık dili kullan. "
-        "Yorumun detaylı olsun: semboller, duygu hali, zamanlama (yakın/orta vade), öneri.\n"
-        "Türkçe yaz."
+    # kahve falı üretimi
+    return _ai().generate_coffee_reading(
+        images=images,
+        topic=topic,
+        focus_text=focus_text,
+        name=name,
+        age=age,
     )
-
-    user_text = (
-        f"Kullanıcı adı: {name}\n"
-        f"Fal konusu: {topic}\n"
-        f"Soru: {question}\n"
-        f"İlişki durumu: {relationship_status or 'belirtilmedi'}\n"
-        f"Büyük karar: {big_decision or 'belirtilmedi'}\n\n"
-        "Görsellerdeki telve/fincan izlerini analiz et. "
-        "Önce gördüğün sembolleri madde madde yaz, sonra uzun fal yorumuna geç."
-    )
-
-    resp = client.responses.create(
-        model=settings.OPENAI_MODEL,
-        input=[
-            {"role": "system", "content": [{"type": "input_text", "text": system}]},
-            {"role": "user", "content": [{"type": "input_text", "text": user_text}, *images]},
-        ],
-    )
-
-    out = (resp.output_text or "").strip()
-    if not out:
-        raise RuntimeError("OpenAI boş yanıt döndü.")
-    return out

@@ -7,31 +7,27 @@ from uuid import uuid4
 from sqlmodel import SQLModel, Field
 
 
-class CoffeeReadingDB(SQLModel, table=True):
-    __tablename__ = "coffee_readings"
+class HandReadingDB(SQLModel, table=True):
+    __tablename__ = "hand_readings"
 
-    # ✅ PK: default uuid
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True, index=True)
 
-    # Kullanıcı inputları
     topic: str = Field(default="Genel", index=True)
     question: str = Field(default="")
 
     name: str = Field(default="", index=True)
     age: Optional[int] = Field(default=None)
 
-    # Foto & sonuç
-    images_json: str = Field(default="[]")       # path listesi json string
+    images_json: str = Field(default="[]")
     result_text: Optional[str] = Field(default=None)
 
-    # süreç
-    status: str = Field(default="created", index=True)  # created/images_uploaded/paid/done
+    status: str = Field(default="created", index=True)
     is_paid: bool = Field(default=False)
     payment_ref: Optional[str] = Field(default=None)
 
-    # rating
+    invalid_reason: Optional[str] = Field(default=None)  # el değilse neden
+
     rating: Optional[int] = Field(default=None)
 
-    # timestamps
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

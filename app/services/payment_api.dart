@@ -16,11 +16,8 @@ class PaymentStartResult {
   });
 
   factory PaymentStartResult.fromJson(Map<String, dynamic> json) {
-    final status = (json['status'] ?? '').toString().toLowerCase();
-    final ok = (json['ok'] == true) || status == 'success';
-
     return PaymentStartResult(
-      ok: ok,
+      ok: (json['status']?.toString() ?? '') == 'success',
       paymentId: json['payment_id']?.toString() ?? '',
       provider: json['provider']?.toString() ?? '',
     );
@@ -30,7 +27,6 @@ class PaymentStartResult {
 class PaymentApi {
   static String get _base => ApiBase.baseUrl;
 
-  /// Mock ödeme başlatır -> {payment_id, ok/status, provider}
   static Future<PaymentStartResult> startPayment({
     required String readingId,
     required double amount,
