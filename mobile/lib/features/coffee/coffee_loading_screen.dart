@@ -1,8 +1,9 @@
-// lib/features/coffee/coffee_loading_screen.dart
 import 'package:flutter/material.dart';
 
-import '../../services/coffee_api.dart';
 import '../../models/coffee_reading.dart';
+import '../../services/coffee_api.dart';
+import '../../widgets/glass_card.dart';
+import '../../widgets/mystic_scaffold.dart';
 import 'coffee_result_screen.dart';
 
 class CoffeeLoadingScreen extends StatefulWidget {
@@ -30,30 +31,31 @@ class _CoffeeLoadingScreenState extends State<CoffeeLoadingScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Yorum üretilemedi: $e')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Yorum üretilemedi: $e')));
       Navigator.of(context).pop();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
+    return MysticScaffold(
+      scrimOpacity: 0.86,
+      patternOpacity: 0.12,
       body: Center(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 16),
-              Text(
-                'Fincandaki işaretler çözülüyor...\n'
-                'Fotoğraflar analiz ediliyor ve fal yazılıyor.',
-                textAlign: TextAlign.center,
-              ),
-            ],
+        child: SizedBox(
+          width: 520,
+          child: GlassCard(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: const [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text(
+                  'Fincandaki işaretler çözülüyor...\nFotoğraflar analiz ediliyor ve fal yazılıyor.',
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
           ),
         ),
       ),

@@ -23,23 +23,29 @@ class FeatureCard extends StatelessWidget {
       child: Ink(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(24),
-          gradient: const LinearGradient(
+
+          // ✅ Arka plan üstünde “belli” olması için güçlü glass
+          color: Colors.black.withOpacity(0.42),
+
+          // ✅ Mor-altın vibe
+          gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: [
-              Color(0xFF24113A),
-              Color(0xFF3A1D4E),
-              Color(0xFF5A2E63),
+              Colors.black.withOpacity(0.48),
+              const Color(0xFF2A1642).withOpacity(0.60),
+              Colors.black.withOpacity(0.48),
             ],
           ),
+
           border: Border.all(
-            color: AppColors.accent.withOpacity(0.7),
-            width: 1.2,
+            color: AppColors.gold.withOpacity(0.55),
+            width: 1.1,
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.6),
-              blurRadius: 16,
+              color: Colors.black.withOpacity(0.60),
+              blurRadius: 18,
               offset: const Offset(0, 10),
             ),
           ],
@@ -51,20 +57,13 @@ class FeatureCard extends StatelessWidget {
               Container(
                 height: 46,
                 width: 46,
-                decoration: BoxDecoration(
+                decoration: const BoxDecoration(
                   shape: BoxShape.circle,
-                  gradient: const LinearGradient(
-                    colors: [
-                      Color(0xFFFFE29F),
-                      Color(0xFFF9C440),
-                    ],
+                  gradient: LinearGradient(
+                    colors: [AppColors.gold, AppColors.goldSoft],
                   ),
                 ),
-                child: Icon(
-                  icon,
-                  color: Colors.black,
-                  size: 26,
-                ),
+                child: Icon(icon, color: Colors.black, size: 26),
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -75,7 +74,7 @@ class FeatureCard extends StatelessWidget {
                       title,
                       style: const TextStyle(
                         fontSize: 16,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -89,6 +88,7 @@ class FeatureCard extends StatelessWidget {
                   ],
                 ),
               ),
+              Icon(Icons.chevron_right, color: Colors.white.withOpacity(0.65)),
             ],
           ),
         ),

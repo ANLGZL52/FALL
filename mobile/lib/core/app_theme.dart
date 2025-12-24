@@ -2,55 +2,72 @@ import 'package:flutter/material.dart';
 import 'app_colors.dart';
 
 class AppTheme {
-  static ThemeData darkTheme() {
-    final base = ThemeData.dark();
+  static ThemeData dark() {
+    final base = ThemeData.dark(useMaterial3: true);
 
     return base.copyWith(
-      scaffoldBackgroundColor: AppColors.background,
+      scaffoldBackgroundColor: Colors.transparent,
+
+      colorScheme: base.colorScheme.copyWith(
+        primary: AppColors.gold,
+        secondary: AppColors.goldSoft,
+        surface: Colors.black,
+      ),
+
       appBarTheme: const AppBarTheme(
         backgroundColor: Colors.transparent,
-        foregroundColor: AppColors.textPrimary,
         elevation: 0,
+        foregroundColor: Colors.white,
         centerTitle: false,
       ),
-      colorScheme: base.colorScheme.copyWith(
-        primary: AppColors.accent,
-        secondary: AppColors.accentSoft,
-        background: AppColors.background,
-      ),
+
       textTheme: base.textTheme.apply(
         bodyColor: AppColors.textPrimary,
         displayColor: AppColors.textPrimary,
       ),
-      elevatedButtonTheme: ElevatedButtonThemeData(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.accent,
-          foregroundColor: Colors.black,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-          textStyle: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ),
+
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: AppColors.cardDark.withOpacity(0.9),
+        fillColor: Colors.black.withOpacity(0.40),
+        labelStyle: TextStyle(color: Colors.white.withOpacity(0.80)),
+        hintStyle: TextStyle(color: Colors.white.withOpacity(0.60)),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(18),
-          borderSide: BorderSide.none,
+          borderSide: BorderSide(color: Colors.white.withOpacity(0.12)),
         ),
-        hintStyle: const TextStyle(
-          color: AppColors.textSecondary,
-          fontSize: 14,
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(18),
+          borderSide: BorderSide(color: Colors.white.withOpacity(0.14)),
         ),
-        labelStyle: const TextStyle(
-          color: AppColors.textSecondary,
-          fontSize: 14,
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(18),
+          borderSide: const BorderSide(color: AppColors.gold, width: 1.2),
         ),
+      ),
+
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.gold,
+          foregroundColor: Colors.black,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          textStyle: const TextStyle(fontWeight: FontWeight.w900),
+        ),
+      ),
+
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: Colors.white,
+          backgroundColor: Colors.black.withOpacity(0.22),
+          side: BorderSide(color: AppColors.gold.withOpacity(0.75), width: 1),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          textStyle: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+      ),
+
+      // ✅ Flutter 3.9+ için doğru tip: CardThemeData
+      cardTheme: CardThemeData(
+        color: Colors.black.withOpacity(0.22),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       ),
     );
   }

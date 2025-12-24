@@ -1,11 +1,12 @@
-// lib/features/coffee/coffee_screen.dart
 import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
-import '../../services/coffee_api.dart';
 import '../../models/coffee_reading.dart';
+import '../../services/coffee_api.dart';
+import '../../widgets/glass_card.dart';
+import '../../widgets/gradient_button.dart';
+import '../../widgets/mystic_scaffold.dart';
 import 'coffee_payment_screen.dart';
 
 class CoffeeScreen extends StatefulWidget {
@@ -37,7 +38,6 @@ class _CoffeeScreenState extends State<CoffeeScreen> {
   }
 
   Future<void> _pickFromGalleryMulti() async {
-    // Multi image picker (galeri) - desktop/phone destekli
     final picked = await _picker.pickMultiImage(imageQuality: 85);
     if (picked.isEmpty) return;
 
@@ -56,9 +56,7 @@ class _CoffeeScreenState extends State<CoffeeScreen> {
     setState(() => _photos.add(File(picked.path)));
   }
 
-  void _removePhoto(int index) {
-    setState(() => _photos.removeAt(index));
-  }
+  void _removePhoto(int index) => setState(() => _photos.removeAt(index));
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
@@ -80,39 +78,26 @@ class _CoffeeScreenState extends State<CoffeeScreen> {
         question: _questionController.text.trim(),
       );
 
-      await CoffeeApi.uploadPhotos(
-        readingId: reading.id,
-        imageFiles: _photos,
-      );
+      await CoffeeApi.uploadPhotos(readingId: reading.id, imageFiles: _photos);
 
       if (!mounted) return;
       Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => CoffeePaymentScreen(readingId: reading.id),
-        ),
+        MaterialPageRoute(builder: (_) => CoffeePaymentScreen(readingId: reading.id)),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Hata: $e')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  Widget _photoGrid() {
+  Widget _photoArea() {
     if (_photos.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.04),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.white.withOpacity(0.10)),
-        ),
+      return GlassCard(
         child: Column(
           children: const [
-            Icon(Icons.coffee_outlined, size: 48),
+            Icon(Icons.coffee_outlined, size: 44, color: Colors.white),
             SizedBox(height: 10),
             Text(
               '3-5 foto ekle:\n(1) fincan içi, (2) tabak, (3) üstten',
@@ -123,13 +108,8 @@ class _CoffeeScreenState extends State<CoffeeScreen> {
       );
     }
 
-    return Container(
+    return GlassCard(
       padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.04),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withOpacity(0.10)),
-      ),
       child: GridView.builder(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
@@ -138,19 +118,13 @@ class _CoffeeScreenState extends State<CoffeeScreen> {
           crossAxisCount: 5,
           crossAxisSpacing: 8,
           mainAxisSpacing: 8,
-          childAspectRatio: 1,
         ),
         itemBuilder: (context, i) {
           return Stack(
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(12),
-                child: Image.file(
-                  _photos[i],
-                  fit: BoxFit.cover,
-                  width: double.infinity,
-                  height: double.infinity,
-                ),
+                child: Image.file(_photos[i], fit: BoxFit.cover, width: double.infinity, height: double.infinity),
               ),
               Positioned(
                 right: 4,
@@ -159,14 +133,14 @@ class _CoffeeScreenState extends State<CoffeeScreen> {
                   onTap: () => _removePhoto(i),
                   child: Container(
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.6),
+                      color: Colors.black.withOpacity(0.65),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     padding: const EdgeInsets.all(4),
-                    child: const Icon(Icons.close, size: 16),
+                    child: const Icon(Icons.close, size: 16, color: Colors.white),
                   ),
                 ),
-              )
+              ),
             ],
           );
         },
@@ -176,16 +150,17 @@ class _CoffeeScreenState extends State<CoffeeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Kahve Falı'),
-      ),
-      body: Container(
+    return MysticScaffold(
+      scrimOpacity: 0.82,  // ✅ KAHVE ekranı: daha koyu -> butonlar net
+      patternOpacity: 0.18,
+      appBar: AppBar(title: const Text('Kahve Falı')),
+      body: Padding(
         padding: const EdgeInsets.all(16),
         child: ListView(
           children: [
-            _photoGrid(),
+            _photoArea(),
             const SizedBox(height: 12),
+
             Row(
               children: [
                 Expanded(
@@ -205,49 +180,48 @@ class _CoffeeScreenState extends State<CoffeeScreen> {
                 ),
               ],
             ),
+
             const SizedBox(height: 18),
 
-            Form(
-              key: _formKey,
-              child: Column(
-                children: [
-                  TextFormField(
-                    controller: _topicController,
-                    decoration: const InputDecoration(labelText: 'Konu (Aşk/İş/Para/Genel)'),
-                    validator: (v) => (v == null || v.trim().isEmpty) ? 'Zorunlu' : null,
-                  ),
-                  const SizedBox(height: 10),
-                  TextFormField(
-                    controller: _questionController,
-                    maxLines: 3,
-                    decoration: const InputDecoration(labelText: 'Sorun / odak noktan'),
-                    validator: (v) => (v == null || v.trim().isEmpty) ? 'Zorunlu' : null,
-                  ),
-                  const SizedBox(height: 10),
-                  TextFormField(
-                    controller: _nameController,
-                    decoration: const InputDecoration(labelText: 'İsim'),
-                    validator: (v) => (v == null || v.trim().isEmpty) ? 'Zorunlu' : null,
-                  ),
-                  const SizedBox(height: 10),
-                  TextFormField(
-                    controller: _ageController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Yaş (opsiyonel)'),
-                  ),
-                ],
+            GlassCard(
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  children: [
+                    TextFormField(
+                      controller: _topicController,
+                      decoration: const InputDecoration(labelText: 'Konu (Aşk/İş/Para/Genel)'),
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Zorunlu' : null,
+                    ),
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      controller: _questionController,
+                      maxLines: 3,
+                      decoration: const InputDecoration(labelText: 'Sorun / odak noktan'),
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Zorunlu' : null,
+                    ),
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      controller: _nameController,
+                      decoration: const InputDecoration(labelText: 'İsim'),
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Zorunlu' : null,
+                    ),
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      controller: _ageController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Yaş (opsiyonel)'),
+                    ),
+                  ],
+                ),
               ),
             ),
 
             const SizedBox(height: 18),
-            SizedBox(
-              height: 54,
-              child: ElevatedButton(
-                onPressed: _loading ? null : _submit,
-                child: _loading
-                    ? const CircularProgressIndicator()
-                    : const Text('Fal Başlat (Ödeme Adımına Geç)'),
-              ),
+
+            GradientButton(
+              text: _loading ? 'Yükleniyor...' : 'Fal Başlat (Ödeme Adımına Geç)',
+              onPressed: _loading ? null : _submit,
             ),
           ],
         ),

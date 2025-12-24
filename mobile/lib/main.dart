@@ -12,9 +12,8 @@ class FallApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'MysticAura',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.darkTheme(),
+      theme: AppTheme.dark(),
       home: const HomeScreen(),
     );
   }

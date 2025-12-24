@@ -2,67 +2,42 @@ import 'package:flutter/material.dart';
 import '../core/app_colors.dart';
 
 class GradientButton extends StatelessWidget {
-  final String label;
+  final String text;
   final VoidCallback? onPressed;
-  final IconData? icon;
 
   const GradientButton({
     super.key,
-    required this.label,
+    required this.text,
     this.onPressed,
-    this.icon,
   });
 
   @override
   Widget build(BuildContext context) {
-    final child = Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (icon != null) ...[
-          Icon(icon, size: 20, color: Colors.black),
-          const SizedBox(width: 8),
-        ],
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w700,
-            color: Colors.black,
+    return SizedBox(
+      height: 54,
+      width: double.infinity,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          gradient: const LinearGradient(
+            colors: [AppColors.goldSoft, AppColors.gold],
           ),
-        ),
-      ],
-    );
-
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
-        gradient: const LinearGradient(
-          colors: [
-            Color(0xFFFFE29F),
-            Color(0xFFF9C440),
-            Color(0xFFE0AA3E),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.45),
+              blurRadius: 18,
+              offset: const Offset(0, 10),
+            )
           ],
         ),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.accent.withOpacity(0.4),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
+        child: ElevatedButton(
+          onPressed: onPressed,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.transparent,
+            shadowColor: Colors.transparent,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
           ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(28),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(28),
-          onTap: onPressed,
-          child: Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
-            child: child,
-          ),
+          child: Text(text, style: const TextStyle(color: Colors.black)),
         ),
       ),
     );

@@ -1,8 +1,10 @@
-// lib/features/coffee/coffee_result_screen.dart
 import 'package:flutter/material.dart';
 
 import '../../models/coffee_reading.dart';
 import '../../services/coffee_api.dart';
+import '../../widgets/glass_card.dart';
+import '../../widgets/gradient_button.dart';
+import '../../widgets/mystic_scaffold.dart';
 
 class CoffeeResultScreen extends StatefulWidget {
   final CoffeeReading reading;
@@ -23,17 +25,11 @@ class _CoffeeResultScreenState extends State<CoffeeResultScreen> {
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            liked ? 'Memnun olmana sevindim ✨' : 'Not ettim. Bir dahaki daha iyi olacak.',
-          ),
-        ),
+        SnackBar(content: Text(liked ? 'Memnun olmana sevindim ✨' : 'Not ettim. Bir dahaki daha iyi olacak.')),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Geri bildirim hatası: $e')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Geri bildirim hatası: $e')));
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -47,20 +43,22 @@ class _CoffeeResultScreenState extends State<CoffeeResultScreen> {
     final title = isRejected ? 'Foto Uygun Değil' : 'Fal Sonucu';
     final comment = widget.reading.comment ?? 'Yorum bulunamadı.';
 
-    return Scaffold(
+    return MysticScaffold(
+      scrimOpacity: 0.86,
+      patternOpacity: 0.12,
       appBar: AppBar(title: Text(title)),
       body: Padding(
         padding: const EdgeInsets.all(16),
-        child: isRejected ? _buildRejected(context, comment) : _buildReady(context, comment),
+        child: isRejected ? _buildRejected(comment) : _buildReady(comment),
       ),
     );
   }
 
-  Widget _buildRejected(BuildContext context, String comment) {
+  Widget _buildRejected(String comment) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _card(comment),
+        GlassCard(child: Text(comment, style: const TextStyle(height: 1.5))),
         const SizedBox(height: 12),
         Text(
           'Lütfen sadece kahve falına ait fotoğraflar yükle:\n'
@@ -69,43 +67,37 @@ class _CoffeeResultScreenState extends State<CoffeeResultScreen> {
           '• üstten yakın plan\n'
           '3–5 foto olmalı.',
           textAlign: TextAlign.center,
-          style: TextStyle(color: Colors.white.withOpacity(0.75)),
+          style: TextStyle(color: Colors.white.withOpacity(0.80)),
         ),
         const Spacer(),
-        SizedBox(
-          height: 54,
-          child: ElevatedButton(
-            onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
-            child: const Text('Yeni Foto ile Tekrar Dene'),
-          ),
+        GradientButton(
+          text: 'Yeni Foto ile Tekrar Dene',
+          onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
         ),
       ],
     );
   }
 
-  Widget _buildReady(BuildContext context, String comment) {
+  Widget _buildReady(String comment) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _card(comment),
-        const Spacer(),
-        const Text(
-          'Bu faldan memnun kaldın mı?',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontWeight: FontWeight.w600),
+        Expanded(
+          child: GlassCard(
+            child: SingleChildScrollView(
+              child: Text(comment, style: const TextStyle(height: 1.5)),
+            ),
+          ),
         ),
+        const SizedBox(height: 14),
+        const Text('Bu faldan memnun kaldın mı?', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w800)),
         const SizedBox(height: 10),
         if (_sending)
           const Center(child: CircularProgressIndicator())
         else
           Row(
             children: [
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: () => _send(true),
-                  child: const Text('Evet'),
-                ),
-              ),
+              Expanded(child: GradientButton(text: 'Evet', onPressed: () => _send(true))),
               const SizedBox(width: 12),
               Expanded(
                 child: OutlinedButton(
@@ -116,19 +108,6 @@ class _CoffeeResultScreenState extends State<CoffeeResultScreen> {
             ],
           ),
       ],
-    );
-  }
-
-  Widget _card(String text) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.04),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.10)),
-      ),
-      child: Text(text, style: const TextStyle(fontSize: 14, height: 1.4)),
     );
   }
 }
