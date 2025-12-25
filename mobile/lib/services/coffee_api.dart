@@ -1,8 +1,8 @@
-// lib/services/coffee_api.dart
+// mobile/lib/services/coffee_api.dart
 import 'dart:convert';
 import 'dart:io';
-
 import 'package:http/http.dart' as http;
+
 import '../models/coffee_reading.dart';
 import 'api_base.dart';
 
@@ -14,18 +14,23 @@ class CoffeeApi {
     int? age,
     required String topic,
     required String question,
+    String? relationshipStatus,
+    String? bigDecision,
   }) async {
     final uri = Uri.parse('$_base/coffee/start');
+    final body = {
+      "name": name,
+      "age": age,
+      "topic": topic,
+      "question": question,
+      "relationship_status": relationshipStatus,
+      "big_decision": bigDecision,
+    };
 
     final res = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'name': name,
-        'age': age,
-        'topic': topic,
-        'question': question,
-      }),
+      headers: {"Content-Type": "application/json"},
+      body: jsonEncode(body),
     );
 
     if (res.statusCode != 200) {
@@ -35,19 +40,19 @@ class CoffeeApi {
     return CoffeeReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
-  /// 3-5 foto şart. Backend List[UploadFile] beklediği için field adı "files".
-  static Future<CoffeeReading> uploadPhotos({
+  /// ✅ Backend endpoint: /upload-images
+  static Future<CoffeeReading> uploadImages({
     required String readingId,
-    required List<File> imageFiles,
+    required List<File> files,
   }) async {
     final uri = Uri.parse('$_base/coffee/$readingId/upload-images');
-    final request = http.MultipartRequest('POST', uri);
+    final req = http.MultipartRequest('POST', uri);
 
-    for (final f in imageFiles) {
-      request.files.add(await http.MultipartFile.fromPath('files', f.path));
+    for (final f in files) {
+      req.files.add(await http.MultipartFile.fromPath('files', f.path));
     }
 
-    final streamed = await request.send();
+    final streamed = await req.send();
     final res = await http.Response.fromStream(streamed);
 
     if (res.statusCode != 200) {
@@ -57,20 +62,38 @@ class CoffeeApi {
     return CoffeeReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
+  /// ✅ ESKİ KODLAR BOZULMASIN diye ALIAS
+  /// coffee_screen.dart bazen imageFiles paramı ile çağırıyor.
+  static Future<CoffeeReading> uploadPhotos({
+    required String readingId,
+    List<File>? files,
+    List<File>? imageFiles,
+  }) {
+    final chosen = (files != null && files.isNotEmpty)
+        ? files
+        : (imageFiles ?? <File>[]);
+
+    if (chosen.isEmpty) {
+      throw Exception('uploadPhotos failed: files/imageFiles is empty');
+    }
+
+    return uploadImages(readingId: readingId, files: chosen);
+  }
+
   static Future<CoffeeReading> markPaid({
     required String readingId,
-    required String paymentRef,
+    String? paymentRef,
   }) async {
     final uri = Uri.parse('$_base/coffee/$readingId/mark-paid');
 
     final res = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'payment_ref': paymentRef}),
+      headers: {"Content-Type": "application/json"},
+      body: jsonEncode({"payment_ref": paymentRef}),
     );
 
     if (res.statusCode != 200) {
-      throw Exception('markPaid failed: ${res.statusCode} / ${res.body}');
+      throw Exception('mark-paid failed: ${res.statusCode} / ${res.body}');
     }
 
     return CoffeeReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
@@ -106,14 +129,14 @@ class CoffeeApi {
 
   static Future<CoffeeReading> rate({
     required String readingId,
-    required int rating, // 1-5
+    required int rating,
   }) async {
     final uri = Uri.parse('$_base/coffee/$readingId/rate');
 
     final res = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'rating': rating}),
+      headers: {"Content-Type": "application/json"},
+      body: jsonEncode({"rating": rating}),
     );
 
     if (res.statusCode != 200) {

@@ -1,4 +1,4 @@
-// lib/models/coffee_reading.dart
+// mobile/lib/models/coffee_reading.dart
 class CoffeeReading {
   final String id;
   final String name;
@@ -6,8 +6,11 @@ class CoffeeReading {
   final String topic;
   final String question;
   final List<String> photos;
-  final String status; // pending_photos|pending_payment|paid|processing|ready|rejected
+  final String status;
+
+  // ✅ yorum
   final String? comment;
+
   final int? rating;
   final String? paymentRef;
   final String createdAt;
@@ -26,41 +29,25 @@ class CoffeeReading {
     required this.createdAt,
   });
 
-  factory CoffeeReading.fromJson(Map<String, dynamic> json) {
-    return CoffeeReading(
-      id: json['id']?.toString() ?? '',
-      name: json['name']?.toString() ?? '',
-      age: json['age'] == null ? null : int.tryParse(json['age'].toString()),
-      topic: json['topic']?.toString() ?? '',
-      question: json['question']?.toString() ?? '',
-      photos: (json['photos'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
-      status: json['status']?.toString() ?? 'pending_photos',
-      comment: json['comment']?.toString(),
-      rating: json['rating'] == null ? null : int.tryParse(json['rating'].toString()),
-      paymentRef: json['payment_ref']?.toString(),
-      createdAt: json['created_at']?.toString() ?? '',
-    );
-  }
+  factory CoffeeReading.fromJson(Map<String, dynamic> j) {
+    final photos = (j['photos'] as List?)?.map((e) => e.toString()).toList() ?? <String>[];
 
-  CoffeeReading copyWith({
-    String? status,
-    String? comment,
-    int? rating,
-    List<String>? photos,
-    String? paymentRef,
-  }) {
+    // ✅ backend comment veya result_text dönebilir
+    final rawComment = (j['comment'] ?? j['result_text'])?.toString();
+    final comment = (rawComment != null && rawComment.trim().isNotEmpty) ? rawComment : null;
+
     return CoffeeReading(
-      id: id,
-      name: name,
-      age: age,
-      topic: topic,
-      question: question,
-      photos: photos ?? this.photos,
-      status: status ?? this.status,
-      comment: comment ?? this.comment,
-      rating: rating ?? this.rating,
-      paymentRef: paymentRef ?? this.paymentRef,
-      createdAt: createdAt,
+      id: j['id'].toString(),
+      name: (j['name'] ?? '').toString(),
+      age: j['age'] == null ? null : int.tryParse(j['age'].toString()),
+      topic: (j['topic'] ?? '').toString(),
+      question: (j['question'] ?? '').toString(),
+      photos: photos,
+      status: (j['status'] ?? '').toString(),
+      comment: comment,
+      rating: j['rating'] == null ? null : int.tryParse(j['rating'].toString()),
+      paymentRef: (j['payment_ref'] ?? j['paymentRef'])?.toString(),
+      createdAt: (j['created_at'] ?? j['createdAt'] ?? '').toString(),
     );
   }
 }

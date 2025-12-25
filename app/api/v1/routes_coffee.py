@@ -2,192 +2,188 @@
 from __future__ import annotations
 
 import os
-import json
-from typing import List
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from typing import List, Optional
+from datetime import datetime
+
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from pydantic import BaseModel
+from sqlmodel import Session
 
+from app.db import get_session
 from app.core.config import settings
-from app.services.storage import save_uploads, delete_reading_uploads
-from app.services.openai_service import OpenAIService
-
-# DB tarafın sende nasıl ise aynı kalsın diye:
-from app.db.session import get_session
 from app.models.coffee_db import CoffeeReadingDB
-
+from app.repositories.coffee_repo import (
+    get_reading,
+    create_reading,
+    update_reading,
+    set_photos,
+    list_photos,
+    set_status,
+)
+from app.services.storage import save_uploads
+from app.services.openai_service import generate_fortune, validate_coffee_images
+from app.schemas.coffee import CoffeeStartRequest, CoffeeReading
 
 router = APIRouter(prefix="/coffee", tags=["coffee"])
 
 
-class CoffeeStartIn(BaseModel):
-    name: str
-    age: int | None = None
-    topic: str
-    question: str
+class MarkPaidRequest(BaseModel):
+    payment_ref: Optional[str] = None
 
 
-class MarkPaidIn(BaseModel):
-    payment_ref: str
-
-
-class RateIn(BaseModel):
+class RatingRequest(BaseModel):
     rating: int
 
 
-@router.post("/start")
-def start_reading(payload: CoffeeStartIn):
-    session = get_session()
-    try:
-        rid = CoffeeReadingDB.create_new_id()  # sende yoksa alttaki gibi yap:
-        # rid = str(uuid.uuid4())
-
-        reading = CoffeeReadingDB(
-            id=rid,
-            topic=payload.topic,
-            question=payload.question,
-            name=payload.name,
-            age=payload.age,
-            images_json="[]",
-            result_text=None,
-            status="created",
-            is_paid=False,
-            payment_ref=None,
-            rating=None,
-        )
-        session.add(reading)
-        session.commit()
-        session.refresh(reading)
-        return reading.to_dict()
-    except Exception as e:
-        session.rollback()
-        raise
-    finally:
-        session.close()
+def _get_or_404(session: Session, reading_id: str) -> CoffeeReadingDB:
+    r = get_reading(session, reading_id)
+    if not r:
+        raise HTTPException(status_code=404, detail="Reading not found")
+    return r
 
 
-@router.post("/{reading_id}/upload-images")
-async def upload_images(reading_id: str, files: List[UploadFile] = File(...)):
-    if len(files) < settings.MIN_PHOTOS or len(files) > settings.MAX_PHOTOS:
+def _to_schema(r: CoffeeReadingDB) -> CoffeeReading:
+    photos = list_photos(r)
+    result = getattr(r, "result_text", None)
+
+    return CoffeeReading(
+        id=r.id,
+        topic=r.topic,
+        question=r.question,
+        name=r.name,
+        age=r.age,
+        photos=photos,
+        status=r.status,
+        comment=result,
+        result_text=result,
+        rating=r.rating,
+        is_paid=r.is_paid,
+        payment_ref=r.payment_ref,
+        created_at=r.created_at,
+    )
+
+
+def _delete_paths(paths: List[str]) -> None:
+    for p in paths:
+        try:
+            if os.path.exists(p):
+                os.remove(p)
+        except Exception:
+            pass
+
+
+@router.post("/start", response_model=CoffeeReading)
+async def start(req: CoffeeStartRequest, session: Session = Depends(get_session)):
+    db_obj = CoffeeReadingDB(
+        topic=req.topic,
+        question=req.question,
+        name=req.name,
+        age=req.age,
+        status="pending_payment",
+        is_paid=False,
+        payment_ref=None,
+        result_text=None,
+        images_json="[]",
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db_obj = create_reading(session, db_obj)
+    return _to_schema(db_obj)
+
+
+@router.post("/{reading_id}/upload", response_model=CoffeeReading)
+@router.post("/{reading_id}/upload-images", response_model=CoffeeReading)
+async def upload_images(
+    reading_id: str,
+    files: List[UploadFile] = File(...),
+    session: Session = Depends(get_session),
+):
+    _get_or_404(session, reading_id)
+
+    # ✅ 3-5 foto kuralı (config’ten)
+    if len(files) < settings.min_photos or len(files) > settings.max_photos:
         raise HTTPException(
             status_code=400,
-            detail=f"Foto sayısı {settings.MIN_PHOTOS}-{settings.MAX_PHOTOS} aralığında olmalı."
+            detail=f"Foto sayısı {settings.min_photos}-{settings.max_photos} aralığında olmalı.",
         )
 
-    session = get_session()
-    try:
-        reading = session.get(CoffeeReadingDB, reading_id)
-        if not reading:
-            raise HTTPException(404, "reading not found")
+    saved = await save_uploads(reading_id, files)
 
-        saved = await save_uploads(reading_id=reading_id, files=files)
+    # ✅ Upload sonrası DOĞRULAMA: kahve fincanı içi mi?
+    verdict = validate_coffee_images(saved)
+    if not verdict.get("ok", False):
+        _delete_paths(saved)  # mağduriyeti önle
+        reason = verdict.get("reason", "Görseller kahve fincanı içi değil.")
+        raise HTTPException(status_code=400, detail=reason)
 
-        # DB'ye kaydet
-        reading.images_json = json.dumps(saved, ensure_ascii=False)
-        reading.status = "images_uploaded"
-        session.commit()
-        session.refresh(reading)
-        return reading.to_dict()
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        session.rollback()
-        raise
-    finally:
-        session.close()
+    r = set_photos(session, reading_id, saved)
+    return _to_schema(r)
 
 
-@router.post("/{reading_id}/mark-paid")
-def mark_paid(reading_id: str, payload: MarkPaidIn):
-    session = get_session()
-    try:
-        reading = session.get(CoffeeReadingDB, reading_id)
-        if not reading:
-            raise HTTPException(404, "reading not found")
+@router.post("/{reading_id}/mark-paid", response_model=CoffeeReading)
+async def mark_paid(reading_id: str, body: MarkPaidRequest, session: Session = Depends(get_session)):
+    r = _get_or_404(session, reading_id)
 
-        reading.is_paid = True
-        reading.payment_ref = payload.payment_ref
-        reading.status = "paid"
-        session.commit()
-        session.refresh(reading)
-        return reading.to_dict()
-    finally:
-        session.close()
+    # ✅ ekstra güvenlik: foto yoksa ödeme yok
+    if not list_photos(r):
+        raise HTTPException(status_code=400, detail="Ödeme için önce fotoğraf yüklemelisin.")
+
+    r.is_paid = True
+    r.payment_ref = body.payment_ref
+    r.status = "paid"
+    r = update_reading(session, r)
+    return _to_schema(r)
 
 
-@router.post("/{reading_id}/generate")
-def generate(reading_id: str):
-    session = get_session()
-    try:
-        reading = session.get(CoffeeReadingDB, reading_id)
-        if not reading:
-            raise HTTPException(404, "reading not found")
+@router.post("/{reading_id}/generate", response_model=CoffeeReading)
+async def generate(reading_id: str, session: Session = Depends(get_session)):
+    r = _get_or_404(session, reading_id)
 
-        if not reading.is_paid:
-            raise HTTPException(403, "Not paid")
+    photos = list_photos(r)
+    if not photos:
+        raise HTTPException(status_code=400, detail="No photos uploaded")
 
-        images_list = json.loads(reading.images_json or "[]")  # saved paths
-        if not images_list:
-            raise HTTPException(400, "No images uploaded")
+    if not r.is_paid:
+        raise HTTPException(status_code=400, detail="Payment required before reading")
 
-        # storage'dan byte oku
-        images_bytes = []
-        for item in images_list:
-            path = item.get("path") or item.get("filepath")
-            fname = item.get("filename")
-            if not path or not os.path.exists(path):
-                continue
-            with open(path, "rb") as f:
-                images_bytes.append((f.read(), fname))
+    # idempotent
+    if r.status == "completed" and getattr(r, "result_text", None):
+        return _to_schema(r)
 
-        if not images_bytes:
-            raise HTTPException(400, "Image files missing on disk")
+    # ✅ generate öncesi ekstra doğrulama (opsiyonel ama sağlam)
+    verdict = validate_coffee_images(photos)
+    if not verdict.get("ok", False):
+        raise HTTPException(status_code=400, detail=verdict.get("reason", "Görseller kahve fincanı içi değil."))
 
-        ai = OpenAIService()
+    r = set_status(session, reading_id, "processing")
 
-        text = ai.generate_coffee_reading(
-            images=images_bytes,
-            topic=reading.topic,
-            focus_text=reading.question,   # ✅ artık uyumlu
-            name=reading.name,
-            age=reading.age,
-        )
+    comment = generate_fortune(
+        name=r.name,
+        topic=r.topic,
+        question=r.question,
+        image_paths=photos,
+    )
 
-        reading.result_text = text
-        reading.status = "done"
-        session.commit()
-        session.refresh(reading)
-        return reading.to_dict()
+    # Eğer model yine de "fincan değil" diyorsa completed yapmayalım
+    if comment.strip() == "Görseller kahve fincanı içi görünmüyor.":
+        r = set_status(session, reading_id, "paid", comment=None)  # geri al
+        raise HTTPException(status_code=400, detail="Görseller kahve fincanı içi görünmüyor.")
 
-    finally:
-        session.close()
+    r = set_status(session, reading_id, "completed", comment=comment)
+    return _to_schema(r)
 
 
-@router.get("/{reading_id}")
-def detail(reading_id: str):
-    session = get_session()
-    try:
-        reading = session.get(CoffeeReadingDB, reading_id)
-        if not reading:
-            raise HTTPException(404, "reading not found")
-        return reading.to_dict()
-    finally:
-        session.close()
+@router.get("/{reading_id}", response_model=CoffeeReading)
+async def detail(reading_id: str, session: Session = Depends(get_session)):
+    r = _get_or_404(session, reading_id)
+    return _to_schema(r)
 
 
-@router.post("/{reading_id}/rate")
-def rate(reading_id: str, payload: RateIn):
-    if payload.rating < 1 or payload.rating > 5:
-        raise HTTPException(400, "rating must be 1-5")
-
-    session = get_session()
-    try:
-        reading = session.get(CoffeeReadingDB, reading_id)
-        if not reading:
-            raise HTTPException(404, "reading not found")
-        reading.rating = payload.rating
-        session.commit()
-        session.refresh(reading)
-        return reading.to_dict()
-    finally:
-        session.close()
+@router.post("/{reading_id}/rate", response_model=CoffeeReading)
+async def rate(reading_id: str, req: RatingRequest, session: Session = Depends(get_session)):
+    r = _get_or_404(session, reading_id)
+    if req.rating < 1 or req.rating > 5:
+        raise HTTPException(status_code=400, detail="Rating must be 1..5")
+    r.rating = req.rating
+    r = update_reading(session, r)
+    return _to_schema(r)
