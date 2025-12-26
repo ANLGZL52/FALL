@@ -1,16 +1,14 @@
-# app/main.py
+from __future__ import annotations
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.db import create_db_and_tables
+from app.db import init_db
 from app.api.v1.routes_coffee import router as coffee_router
+from app.api.v1.routes_hand import router as hand_router
 from app.api.v1.routes_payments import router as payments_router
 
-app = FastAPI(title="FALL Backend")
-
-@app.on_event("startup")
-def on_startup():
-    create_db_and_tables()
+app = FastAPI(title="FALL API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,10 +18,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
 
-# ✅ kritik: /api/v1 prefix ile include
+@app.on_event("startup")
+def on_startup() -> None:
+    init_db()
+
+
 app.include_router(coffee_router, prefix="/api/v1")
+app.include_router(hand_router, prefix="/api/v1")
 app.include_router(payments_router, prefix="/api/v1")

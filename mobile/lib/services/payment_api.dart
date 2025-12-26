@@ -1,57 +1,67 @@
-// lib/services/payment_api.dart
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import 'api_base.dart';
 
-class PaymentStartResult {
+class StartPaymentResult {
   final bool ok;
-  final String paymentId;
+  final String status;
   final String provider;
+  final String paymentId;
+  final String product;
+  final String readingId;
+  final double amount;
 
-  PaymentStartResult({
+  StartPaymentResult({
     required this.ok,
-    required this.paymentId,
+    required this.status,
     required this.provider,
+    required this.paymentId,
+    required this.product,
+    required this.readingId,
+    required this.amount,
   });
 
-  factory PaymentStartResult.fromJson(Map<String, dynamic> json) {
-    final status = (json['status'] ?? '').toString().toLowerCase();
-    final ok = (json['ok'] == true) || status == 'success';
-
-    return PaymentStartResult(
-      ok: ok,
-      paymentId: json['payment_id']?.toString() ?? '',
-      provider: json['provider']?.toString() ?? '',
+  factory StartPaymentResult.fromJson(Map<String, dynamic> j) {
+    // backend hem payment_id hem payment_ref döndürüyor olabilir
+    final pid = (j['payment_id'] ?? j['paymentId'] ?? j['payment_ref'] ?? '').toString();
+    return StartPaymentResult(
+      ok: (j['ok'] ?? true) as bool,
+      status: (j['status'] ?? 'success').toString(),
+      provider: (j['provider'] ?? 'mock').toString(),
+      paymentId: pid,
+      product: (j['product'] ?? 'coffee').toString(),
+      readingId: (j['reading_id'] ?? j['readingId'] ?? '').toString(),
+      amount: (j['amount'] is num) ? (j['amount'] as num).toDouble() : double.tryParse('${j['amount']}') ?? 0.0,
     );
   }
 }
 
 class PaymentApi {
-  static String get _base => ApiBase.baseUrl;
-
-  /// Mock ödeme başlatır -> {payment_id, ok/status, provider}
-  static Future<PaymentStartResult> startPayment({
+  static Future<StartPaymentResult> startPayment({
     required String readingId,
-    required double amount,
+    double? amount,
+    String product = "coffee", // ✅ coffee bozulmasın, default coffee
   }) async {
-    final uri = Uri.parse('$_base/payments/start');
+    final url = Uri.parse('${ApiBase.baseUrl}/payments/start');
+
+    final body = <String, dynamic>{
+      "reading_id": readingId,
+      "product": product,
+    };
+    if (amount != null) body["amount"] = amount;
 
     final res = await http.post(
-      uri,
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'reading_id': readingId,
-        'amount': amount,
-      }),
+      url,
+      headers: {"Content-Type": "application/json"},
+      body: jsonEncode(body),
     );
 
-    if (res.statusCode != 200) {
-      throw Exception('payment start failed: ${res.statusCode} / ${res.body}');
+    if (res.statusCode >= 400) {
+      throw Exception('payments/start failed: ${res.statusCode} / ${res.body}');
     }
 
-    return PaymentStartResult.fromJson(
-      jsonDecode(res.body) as Map<String, dynamic>,
-    );
+    final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+    return StartPaymentResult.fromJson(decoded);
   }
 }

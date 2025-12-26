@@ -8,6 +8,10 @@ from openai import OpenAI
 from app.core.config import settings
 
 
+# -------------------------
+# Helpers
+# -------------------------
+
 def _require_key() -> str:
     key = (settings.openai_api_key or "").strip()
     if not key:
@@ -42,9 +46,15 @@ def _to_data_url(path: str) -> str:
 
 
 def _parse_json_object(text: str) -> Optional[dict]:
+    """
+    Model bazen JSON'u '```json ... ```' gibi sarmalayabiliyor veya etrafına yazı koyabiliyor.
+    Bu fonksiyon hem direkt json.loads dener, hem de { ... } aralığını ayıklar.
+    """
     if not text:
         return None
     t = text.strip()
+
+    # direkt dene
     try:
         obj = json.loads(t)
         if isinstance(obj, dict):
@@ -52,22 +62,41 @@ def _parse_json_object(text: str) -> Optional[dict]:
     except Exception:
         pass
 
+    # aradan { } çek
     start = t.find("{")
     end = t.rfind("}")
     if start != -1 and end != -1 and end > start:
-        candidate = t[start : end + 1]
+        candidate = t[start: end + 1]
         try:
             obj = json.loads(candidate)
             if isinstance(obj, dict):
                 return obj
         except Exception:
             return None
+
     return None
 
 
-def validate_coffee_images(image_paths: List[str]) -> Dict[str, Any]:
+def _make_client() -> OpenAI:
     key = _require_key()
-    client = OpenAI(api_key=key)
+    return OpenAI(api_key=key)
+
+
+def _model_name() -> str:
+    # settings.openai_model senin mevcut kahve fonksiyonunda zaten kullanılıyor
+    m = (settings.openai_model or "").strip()
+    if not m:
+        # fallback (istersen default’u config’te ver)
+        m = "gpt-4o-mini"
+    return m
+
+
+# -------------------------
+# Coffee (Mevcut çalışan)
+# -------------------------
+
+def validate_coffee_images(image_paths: List[str]) -> Dict[str, Any]:
+    client = _make_client()
 
     images = [{"type": "input_image", "image_url": _to_data_url(p)} for p in image_paths[:5]]
 
@@ -83,12 +112,9 @@ def validate_coffee_images(image_paths: List[str]) -> Dict[str, Any]:
     )
 
     resp = client.responses.create(
-        model=settings.openai_model,
+        model=_model_name(),
         input=[
-            {
-                "role": "user",
-                "content": [{"type": "input_text", "text": prompt}, *images],
-            }
+            {"role": "user", "content": [{"type": "input_text", "text": prompt}, *images]}
         ],
     )
 
@@ -118,12 +144,9 @@ def generate_fortune(
     relationship_status: Optional[str] = None,
     big_decision: Optional[str] = None,
 ) -> str:
-    key = _require_key()
-    client = OpenAI(api_key=key)
-
+    client = _make_client()
     images = [{"type": "input_image", "image_url": _to_data_url(p)} for p in image_paths[:5]]
 
-    # ✅ Burada hedef: LISTE/BAŞLIK YOK. Düz yazı, mistik falcı anlatısı.
     system = (
         "Sen deneyimli bir kahve falcısısın.\n"
         "Ton: samimi, sıcak, falcı edasında; sanki karşındaki kişiyle yüz yüze konuşuyorsun.\n"
@@ -157,7 +180,121 @@ def generate_fortune(
     )
 
     resp = client.responses.create(
-        model=settings.openai_model,
+        model=_model_name(),
+        input=[
+            {"role": "system", "content": [{"type": "input_text", "text": system}]},
+            {"role": "user", "content": [{"type": "input_text", "text": user_text}, *images]},
+        ],
+    )
+
+    out = (resp.output_text or "").strip()
+    if not out:
+        raise RuntimeError("OpenAI boş yanıt döndü. (output_text empty)")
+    return out
+
+
+# -------------------------
+# HAND (SENİN İSTEDİĞİN ŞEKİLDE - EKLENDİ)
+# -------------------------
+
+def validate_hand_images(image_paths: List[str]) -> Dict[str, Any]:
+    """
+    Amaç: Ödeme öncesi "el/avuç içi" mi? Değilse reddet.
+    Sıkı kural: En az 1 görsel net şekilde avuç içi/elin çizgilerini göstermeli.
+    Dönen format kahve ile aynı: ok/reason/confidence
+    """
+    client = _make_client()
+
+    images = [{"type": "input_image", "image_url": _to_data_url(p)} for p in image_paths[:5]]
+
+    prompt = (
+        "Sen bir görüntü doğrulama denetçisisin.\n"
+        "Görev: Yüklenen görseller 'EL FALI' için uygun mu?\n\n"
+        "Uygun (ok=true): Avuç içi net (palm) + el çizgileri görünür + el fotoğrafı.\n"
+        "Uygun değil (ok=false): kimlik/ehliyet, yüz, ekran görüntüsü, belge, kahve fincanı, manzara, ürün, yazı ağırlıklı görsel.\n\n"
+        "Kural: En az 1 görsel bile avuç içi net değilse veya el yoksa ok=false.\n"
+        "Sadece JSON döndür:\n"
+        '{"ok": true/false, "reason": "kısa açıklama", "confidence": 0-1}\n'
+        "JSON DIŞINDA hiçbir şey yazma."
+    )
+
+    resp = client.responses.create(
+        model=_model_name(),
+        input=[{"role": "user", "content": [{"type": "input_text", "text": prompt}, *images]}],
+    )
+
+    raw = (resp.output_text or "").strip()
+    obj = _parse_json_object(raw)
+
+    if not obj:
+        # ödeme güvenliği için sıkı davran
+        return {"ok": False, "reason": "Görseller doğrulanamadı. Lütfen avuç içi net fotoğraf yükle.", "confidence": 0.0}
+
+    ok = bool(obj.get("ok", False))
+    reason = str(obj.get("reason", "")).strip() or ("Uygun" if ok else "Görseller el falı için uygun değil (avuç içi net değil).")
+    conf = obj.get("confidence", 0.5)
+    try:
+        conf = float(conf)
+    except Exception:
+        conf = 0.5
+
+    return {"ok": ok, "reason": reason, "confidence": conf}
+
+
+def generate_hand_fortune(
+    *,
+    name: str,
+    topic: str,
+    question: str,
+    image_paths: List[str],
+    dominant_hand: Optional[str] = None,
+    photo_hand: Optional[str] = None,
+    relationship_status: Optional[str] = None,
+    big_decision: Optional[str] = None,
+) -> str:
+    """
+    Backend'in kontrol ettiği kritik cümle:
+    El değilse -> SADECE şu cümleyi döndür:
+    'Görseller el fotoğrafı gibi görünmüyor.'
+    """
+    client = _make_client()
+    images = [{"type": "input_image", "image_url": _to_data_url(p)} for p in image_paths[:5]]
+
+    # Kahvedeki gibi: liste/başlık yok, akıcı anlatı
+    system = (
+        "Sen deneyimli bir el falcısısın.\n"
+        "Ton: samimi, mistik, falcı edasında; ama abartısız ve kesin hüküm vermeyen.\n"
+        "Biçim: KESİNLİKLE madde işareti, numaralı liste, başlık, A) B) yok.\n"
+        "Sadece düz yazı: 6-9 paragraf. Her paragraf 3-6 cümle.\n\n"
+        "Kural-1: Uydurma yok. Görselde seçilebilen çizgilere/işaretlere dayan.\n"
+        "Emin olmadığın yerde 'tam seçilmiyor / net değil' de.\n"
+        "Kural-2: Kesin hüküm yok; olasılık dili kullan.\n"
+        "Kural-3: Kullanıcının konu ve sorusuna en az 2 paragraf direkt cevap ver.\n"
+        "Kural-4: Korkutma yok; negatif şeyleri yumuşak uyarı gibi söyle.\n\n"
+        "İçerik akışı: kısa giriş -> çizgiler (görünüyorsa yaşam/akıl/kalp/kader) -> "
+        "tepecikler (Venüs/Jüpiter/Satürn/Apollo/Merkür) -> zamanlama (0-4 hafta, 1-3 ay, 3-6 ay) -> "
+        "kapanışta küçük bir odak/niyet önerisi.\n\n"
+        "Dil: Türkçe.\n"
+        "Uzunluk: en az 650 kelime.\n\n"
+        "ÇOK ÖNEMLİ: Eğer görseller el/avuç içi fotoğrafı gibi görünmüyorsa, sadece şu tek cümleyi yaz ve dur:\n"
+        "'Görseller el fotoğrafı gibi görünmüyor.'\n"
+    )
+
+    user_text = (
+        f"İsim: {name}\n"
+        f"Konu: {topic}\n"
+        f"Soru: {question}\n"
+        f"Baskın el: {dominant_hand or 'belirtilmedi'}\n"
+        f"Fotoğraftaki el: {photo_hand or 'belirtilmedi'}\n"
+        f"İlişki durumu: {relationship_status or 'belirtilmedi'}\n"
+        f"Büyük karar: {big_decision or 'belirtilmedi'}\n\n"
+        "İstek:\n"
+        "Avuç içi çizgilerini gözlemle ve falcı üslubuyla akıcı bir yorum yaz. "
+        "Listeleme yapma, başlık atma.\n"
+    )
+
+    resp = client.responses.create(
+        model=_model_name(),
         input=[
             {"role": "system", "content": [{"type": "input_text", "text": system}]},
             {"role": "user", "content": [{"type": "input_text", "text": user_text}, *images]},

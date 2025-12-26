@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+
 import '../../core/app_colors.dart';
 import '../../widgets/feature_card.dart';
 import '../../widgets/mystic_scaffold.dart';
+
 import '../coffee/coffee_screen.dart';
+import '../hand/hand_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -10,6 +13,12 @@ class HomeScreen extends StatelessWidget {
   void _openCoffee(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const CoffeeScreen()),
+    );
+  }
+
+  void _openHand(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const HandScreen()),
     );
   }
 
@@ -53,12 +62,17 @@ class HomeScreen extends StatelessWidget {
                       onTap: () => _openCoffee(context),
                     ),
                     const SizedBox(height: 12),
-                    const FeatureCard(
+
+                    // ✅ ARTIK TIKLANABİLİR (const kaldırıldı + onTap eklendi)
+                    FeatureCard(
                       title: 'El Falı',
                       subtitle: 'Avuç içi analizi ve kişilik haritası.',
                       icon: Icons.pan_tool_outlined,
+                      onTap: () => _openHand(context),
                     ),
                     const SizedBox(height: 12),
+
+                    // Şimdilik pasif kalsın (istersen sonra route ekleriz)
                     const FeatureCard(
                       title: 'Tarot',
                       subtitle: '3 - 6 - 12 kart açılımları.',

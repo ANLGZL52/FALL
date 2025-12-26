@@ -1,33 +1,35 @@
+# app/models/hand_db.py
 from __future__ import annotations
 
 from typing import Optional
 from datetime import datetime
-from uuid import uuid4
-
 from sqlmodel import SQLModel, Field
 
 
 class HandReadingDB(SQLModel, table=True):
     __tablename__ = "hand_readings"
 
-    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True, index=True)
+    id: str = Field(primary_key=True, index=True)
 
-    topic: str = Field(default="Genel", index=True)
-    question: str = Field(default="")
+    topic: str
+    question: str
+    name: str
+    age: Optional[int] = None
 
-    name: str = Field(default="", index=True)
-    age: Optional[int] = Field(default=None)
+    dominant_hand: Optional[str] = None   # "right" / "left"
+    photo_hand: Optional[str] = None      # "right" / "left"
 
-    images_json: str = Field(default="[]")
-    result_text: Optional[str] = Field(default=None)
+    relationship_status: Optional[str] = None
+    big_decision: Optional[str] = None
 
-    status: str = Field(default="created", index=True)
-    is_paid: bool = Field(default=False)
-    payment_ref: Optional[str] = Field(default=None)
+    images_json: str = "[]"
+    result_text: Optional[str] = None
 
-    invalid_reason: Optional[str] = Field(default=None)  # el değilse neden
+    status: str = "pending_payment"
+    is_paid: bool = False
+    payment_ref: Optional[str] = None
 
-    rating: Optional[int] = Field(default=None)
+    rating: Optional[int] = None
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
