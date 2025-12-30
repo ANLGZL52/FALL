@@ -32,6 +32,7 @@ def init_db() -> None:
 
     SQLModel.metadata.create_all(engine)
     ensure_hand_schema()
+    ensure_tarot_schema()
 
 
 def _sqlite_has_table(table: str) -> bool:
@@ -83,3 +84,25 @@ def ensure_hand_schema() -> None:
         print(f"[DB] hand_readings altered: {len(alters)} changes applied.")
     else:
         print("[DB] hand_readings schema OK.")
+def ensure_tarot_schema() -> None:
+    # sadece sqlite için mini migration
+    if not settings.database_url.startswith("sqlite"):
+        return
+
+    table = "tarot_readings"
+
+    # tablo var mı?
+    with engine.connect() as conn:
+        try:
+            conn.execute(text(f"SELECT 1 FROM {table} LIMIT 1;"))
+        except Exception:
+            return  # tablo yoksa create_all zaten yaratır
+
+    alters = []
+    # Eğer ileride kolon eklersen buraya ekle.
+    # Şimdilik yeni tablo olduğu için çoğu kullanıcıda gerek kalmayacak.
+    if alters:
+        with engine.begin() as conn:
+            for stmt in alters:
+                conn.execute(text(stmt))
+

@@ -7,6 +7,9 @@ import '../../widgets/mystic_scaffold.dart';
 import '../coffee/coffee_screen.dart';
 import '../hand/hand_screen.dart';
 
+// ✅ Tarot intro ekranı
+import '../tarot/tarot_intro_screen.dart';
+
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
@@ -19,6 +22,12 @@ class HomeScreen extends StatelessWidget {
   void _openHand(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const HandScreen()),
+    );
+  }
+
+  void _openTarot(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const TarotIntroScreen()),
     );
   }
 
@@ -63,7 +72,6 @@ class HomeScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
 
-                    // ✅ ARTIK TIKLANABİLİR (const kaldırıldı + onTap eklendi)
                     FeatureCard(
                       title: 'El Falı',
                       subtitle: 'Avuç içi analizi ve kişilik haritası.',
@@ -72,13 +80,16 @@ class HomeScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
 
-                    // Şimdilik pasif kalsın (istersen sonra route ekleriz)
-                    const FeatureCard(
+                    // ✅ Tarot tıklanabilir
+                    FeatureCard(
                       title: 'Tarot',
                       subtitle: '3 - 6 - 12 kart açılımları.',
                       icon: Icons.style_outlined,
+                      onTap: () => _openTarot(context),
                     ),
                     const SizedBox(height: 12),
+
+                    // Şimdilik pasif
                     const FeatureCard(
                       title: 'Numeroloji',
                       subtitle: 'Yaşam sayısı, kader sayısı ve daha fazlası.',

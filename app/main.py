@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -18,10 +19,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ✅ Windows + reload'ta init_db bazen 2 kez tetiklenebiliyor
+# Bu flag, aynı process içinde tekrar init olmasını engeller.
+_db_initialized = False
 
 @app.on_event("startup")
 def on_startup() -> None:
-    init_db()
+    global _db_initialized
+    if _db_initialized:
+        return
+
+    # ✅ Uvicorn reload parent/child süreçlerinde karışıklık olmaması için
+    # Sadece gerçek server process DB init yapsın.
+    # (Uvicorn reload açıkken bir "reloader" process + bir "server" process oluşur.)
+    if os.environ.get("RUN_MAIN") == "true" or os.environ.get("UVICORN_RELOAD") == "true":
+        init_db()
+        _db_initialized = True
+    else:
+        # reload kapalıysa normal init
+        init_db()
+        _db_initialized = True
 
 
 app.include_router(coffee_router, prefix="/api/v1")
