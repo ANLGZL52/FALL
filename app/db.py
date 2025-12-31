@@ -1,4 +1,3 @@
-# app/db.py
 from __future__ import annotations
 
 from typing import Generator
@@ -7,6 +6,10 @@ from sqlalchemy import text
 
 from app.core.config import settings
 
+# ✅ MODELLERİ MUTLAKA IMPORT ET (create_all için şart)
+from app.models.coffee_db import CoffeeReadingDB
+from app.models.hand_db import HandReadingDB
+from app.models.tarot_db import TarotReadingDB
 
 engine = create_engine(
     settings.database_url,
@@ -30,12 +33,21 @@ def init_db() -> None:
     except Exception as e:
         print(f"[DB] Could not read database_list: {e}")
 
+    # ✅ tabloları oluştur
     SQLModel.metadata.create_all(engine)
+
+    # ✅ sqlite ise mini migration
     ensure_hand_schema()
     ensure_tarot_schema()
 
 
+# -------------------------
+# SQLITE MIGRATION HELPERS
+# -------------------------
+
 def _sqlite_has_table(table: str) -> bool:
+    if not settings.database_url.startswith("sqlite"):
+        return False
     q = text("SELECT name FROM sqlite_master WHERE type='table' AND name=:t;")
     with engine.connect() as conn:
         row = conn.execute(q, {"t": table}).fetchone()
@@ -43,12 +55,18 @@ def _sqlite_has_table(table: str) -> bool:
 
 
 def _sqlite_has_column(table: str, column: str) -> bool:
+    if not settings.database_url.startswith("sqlite"):
+        return False
     q = text(f"PRAGMA table_info({table});")
     with engine.connect() as conn:
         rows = conn.execute(q).fetchall()
     cols = {r[1] for r in rows}  # (cid, name, type, notnull, dflt_value, pk)
     return column in cols
 
+
+# -------------------------
+# HAND SCHEMA (SQLITE)
+# -------------------------
 
 def ensure_hand_schema() -> None:
     # sadece sqlite için mini migration
@@ -84,25 +102,39 @@ def ensure_hand_schema() -> None:
         print(f"[DB] hand_readings altered: {len(alters)} changes applied.")
     else:
         print("[DB] hand_readings schema OK.")
+
+
+# -------------------------
+# TAROT SCHEMA (SQLITE)
+# -------------------------
+
 def ensure_tarot_schema() -> None:
     # sadece sqlite için mini migration
     if not settings.database_url.startswith("sqlite"):
         return
 
     table = "tarot_readings"
+    if not _sqlite_has_table(table):
+        return
 
-    # tablo var mı?
-    with engine.connect() as conn:
-        try:
-            conn.execute(text(f"SELECT 1 FROM {table} LIMIT 1;"))
-        except Exception:
-            return  # tablo yoksa create_all zaten yaratır
+    alters: list[str] = []
 
-    alters = []
-    # Eğer ileride kolon eklersen buraya ekle.
-    # Şimdilik yeni tablo olduğu için çoğu kullanıcıda gerek kalmayacak.
+    # ✅ Tarot için route/schema uyumluluğu
+    if not _sqlite_has_column(table, "payment_ref"):
+        alters.append("ALTER TABLE tarot_readings ADD COLUMN payment_ref VARCHAR;")
+    if not _sqlite_has_column(table, "rating"):
+        alters.append("ALTER TABLE tarot_readings ADD COLUMN rating INTEGER;")
+    if not _sqlite_has_column(table, "cards_json"):
+        alters.append("ALTER TABLE tarot_readings ADD COLUMN cards_json VARCHAR;")
+    if not _sqlite_has_column(table, "updated_at"):
+        alters.append("ALTER TABLE tarot_readings ADD COLUMN updated_at DATETIME;")
+    if not _sqlite_has_column(table, "created_at"):
+        alters.append("ALTER TABLE tarot_readings ADD COLUMN created_at DATETIME;")
+
     if alters:
         with engine.begin() as conn:
             for stmt in alters:
                 conn.execute(text(stmt))
-
+        print(f"[DB] tarot_readings altered: {len(alters)} changes applied.")
+    else:
+        print("[DB] tarot_readings schema OK.")

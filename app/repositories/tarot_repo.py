@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from typing import Optional, List
 from datetime import datetime
+from typing import Optional, List
+
 from sqlmodel import Session, select
 
 from app.models.tarot_db import TarotReadingDB
@@ -15,7 +16,8 @@ def create_reading(session: Session, obj: TarotReadingDB) -> TarotReadingDB:
 
 
 def get_reading(session: Session, reading_id: str) -> Optional[TarotReadingDB]:
-    return session.exec(select(TarotReadingDB).where(TarotReadingDB.id == reading_id)).first()
+    stmt = select(TarotReadingDB).where(TarotReadingDB.id == reading_id)
+    return session.exec(stmt).first()
 
 
 def update_reading(session: Session, obj: TarotReadingDB) -> TarotReadingDB:
@@ -27,10 +29,18 @@ def update_reading(session: Session, obj: TarotReadingDB) -> TarotReadingDB:
 
 
 def set_cards(session: Session, reading_id: str, cards: List[str]) -> TarotReadingDB:
-    obj = get_reading(session, reading_id)
-    assert obj is not None
-    obj.set_cards(cards)
-    return update_reading(session, obj)
+    r = get_reading(session, reading_id)
+    if not r:
+        raise ValueError("reading_not_found")
+
+    r.set_cards(cards)
+    r.status = "selected"
+    r.updated_at = datetime.utcnow()
+
+    session.add(r)
+    session.commit()
+    session.refresh(r)
+    return r
 
 
 def set_status(
@@ -39,9 +49,17 @@ def set_status(
     status: str,
     result_text: Optional[str] = None,
 ) -> TarotReadingDB:
-    obj = get_reading(session, reading_id)
-    assert obj is not None
-    obj.status = status
+    r = get_reading(session, reading_id)
+    if not r:
+        raise ValueError("reading_not_found")
+
+    r.status = status
     if result_text is not None:
-        obj.result_text = result_text
-    return update_reading(session, obj)
+        r.result_text = result_text
+
+    r.updated_at = datetime.utcnow()
+
+    session.add(r)
+    session.commit()
+    session.refresh(r)
+    return r

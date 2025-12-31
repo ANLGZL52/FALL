@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from uuid import uuid4
-from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
@@ -17,6 +16,7 @@ from app.schemas.tarot import (
     TarotRatingRequest,
     TarotReading,
 )
+from app.services.openai_service import generate_tarot_reading
 
 router = APIRouter(prefix="/tarot", tags=["tarot"])
 
@@ -32,9 +32,9 @@ def _to_schema(r: TarotReadingDB) -> TarotReading:
         selected_cards=r.get_cards(),
         status=r.status,
         result_text=r.result_text,
-        rating=r.rating,
+        rating=getattr(r, "rating", None),
         is_paid=r.is_paid,
-        payment_ref=r.payment_ref,
+        payment_ref=getattr(r, "payment_ref", None),
         created_at=r.created_at,
     )
 
@@ -54,9 +54,9 @@ async def start(req: TarotStartRequest, session: Session = Depends(get_session))
         question=req.question,
         name=req.name,
         age=req.age,
-        spread_type=req.spread_type,
-        selected_cards_json="[]",
-        status="pending_payment",
+        spread_type=req.spread_type,     # three/six/twelve
+        cards_json="[]",
+        status="pending_payment",        # ✅ ödeme bekliyor
         is_paid=False,
         payment_ref=None,
         result_text=None,
@@ -72,12 +72,15 @@ async def start(req: TarotStartRequest, session: Session = Depends(get_session))
 async def select_cards(reading_id: str, req: TarotSelectCardsRequest, session: Session = Depends(get_session)):
     r = _get_or_404(session, reading_id)
 
-    # spread türüne göre kart sayısı kontrolü
     wanted = 3
     if r.spread_type == "one":
         wanted = 1
     elif r.spread_type == "five":
         wanted = 5
+    elif r.spread_type == "six":
+        wanted = 6
+    elif r.spread_type == "twelve":
+        wanted = 12
 
     if len(req.cards) != wanted:
         raise HTTPException(status_code=400, detail=f"Bu açılım için {wanted} kart seçmelisin.")
@@ -96,6 +99,7 @@ async def mark_paid(reading_id: str, body: TarotMarkPaidRequest, session: Sessio
     r.is_paid = True
     r.payment_ref = body.payment_ref
     r.status = "paid"
+    r.updated_at = datetime.utcnow()
     r = tarot_repo.update_reading(session, r)
     return _to_schema(r)
 
@@ -109,19 +113,24 @@ async def generate(reading_id: str, session: Session = Depends(get_session)):
     if not r.is_paid:
         raise HTTPException(status_code=400, detail="Payment required before reading")
 
-    # idempotent
     if r.status == "completed" and r.result_text:
         return _to_schema(r)
 
-    r = tarot_repo.set_status(session, reading_id, "processing")
+    tarot_repo.set_status(session, reading_id, "processing")
 
-    cards = r.get_cards()
-    # ✅ Şimdilik placeholder yorum (OpenAI’yi sonra bağlayacağız)
-    text = (
-        f"Seçtiğin kartlar: {', '.join(cards)}.\n\n"
-        f"Bu, Tarot modülünün iskeletinin doğru çalıştığını gösteren geçici bir yorumdur. "
-        f"Bir sonraki adımda OpenAI ile gerçek Tarot yorumunu üreteceğiz."
-    )
+    try:
+        cards = r.get_cards()
+        text = generate_tarot_reading(
+            name=r.name,
+            age=r.age,
+            topic=r.topic,
+            question=r.question,
+            spread_type=r.spread_type,
+            selected_cards=cards,
+        )
+    except Exception as e:
+        tarot_repo.set_status(session, reading_id, "paid")
+        raise HTTPException(status_code=500, detail=f"Tarot yorum üretilemedi: {e}")
 
     r = tarot_repo.set_status(session, reading_id, "completed", result_text=text)
     return _to_schema(r)
@@ -139,5 +148,6 @@ async def rate(reading_id: str, req: TarotRatingRequest, session: Session = Depe
     if req.rating < 1 or req.rating > 5:
         raise HTTPException(status_code=400, detail="Rating must be 1..5")
     r.rating = req.rating
+    r.updated_at = datetime.utcnow()
     r = tarot_repo.update_reading(session, r)
     return _to_schema(r)

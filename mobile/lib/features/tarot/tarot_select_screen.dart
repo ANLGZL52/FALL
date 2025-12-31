@@ -1,22 +1,24 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
+import '../../services/tarot_api.dart';
 import '../../widgets/gradient_button.dart';
 import '../../widgets/glass_card.dart';
 import '../../widgets/mystic_scaffold.dart';
 
+import 'tarot_payment_screen.dart';
 import 'widgets/tarot_card_tile.dart';
-
 import 'tarot_deck.dart';
 import 'tarot_models.dart';
-import 'tarot_result_screen.dart';
 
 class TarotSelectScreen extends StatefulWidget {
+  final String readingId;
   final String question;
   final TarotSpreadType spreadType;
 
   const TarotSelectScreen({
     super.key,
+    required this.readingId,
     required this.question,
     required this.spreadType,
   });
@@ -29,6 +31,7 @@ class _TarotSelectScreenState extends State<TarotSelectScreen> {
   late List<TarotCard> _pool;
   final List<TarotCard> _picked = [];
   bool _revealed = false;
+  bool _loading = false;
 
   int get _need => widget.spreadType.count;
 
@@ -61,26 +64,36 @@ class _TarotSelectScreenState extends State<TarotSelectScreen> {
     setState(() => _revealed = true);
   }
 
-  void _goResult() {
-    final text = _picked.map((c) => "- ${c.nameTr}: ${c.shortMeaningTr}").join("\n");
+  Future<void> _saveAndGoPayment() async {
+    if (_picked.length != _need || !_revealed) return;
 
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
-        builder: (_) => TarotResultScreen(
-          question: widget.question,
-          spreadType: widget.spreadType,
-          selectedCards: _picked,
-          resultText:
-              "Seçtiğin kartların kısa mesajı:\n\n$text\n\n(Detaylı yorum OpenAI adımında gelecek.)",
+    setState(() => _loading = true);
+    try {
+      // backend’e: "<id>|R" veya "<id>|U"
+      final cards = _picked.map((c) {
+        final revFlag = c.isReversed ? "R" : "U";
+        return "${c.id}|$revFlag";
+      }).toList();
+
+      await TarotApi.selectCards(readingId: widget.readingId, cards: cards);
+
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => TarotPaymentScreen(
+            readingId: widget.readingId,
+            question: widget.question,
+            spreadType: widget.spreadType,
+            selectedCards: _picked,
+          ),
         ),
-      ),
-    );
-  }
-
-  ({int cols, int rows}) _slotGridForNeed(int need) {
-    if (need <= 3) return (cols: 3, rows: 1);
-    if (need <= 6) return (cols: 3, rows: 2);
-    return (cols: 4, rows: 3); // 12
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   int _deckColsFor(double w) {
@@ -94,7 +107,6 @@ class _TarotSelectScreenState extends State<TarotSelectScreen> {
   @override
   Widget build(BuildContext context) {
     final positions = widget.spreadType.positionsTr;
-    final grid = _slotGridForNeed(_need);
 
     return MysticScaffold(
       scrimOpacity: 0.78,
@@ -102,88 +114,100 @@ class _TarotSelectScreenState extends State<TarotSelectScreen> {
       appBar: AppBar(
         title: Text(widget.spreadType.label),
         actions: [
-          IconButton(
-            onPressed: _reset,
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Sıfırla',
-          ),
+          IconButton(onPressed: _loading ? null : _reset, icon: const Icon(Icons.refresh)),
         ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            // üst bilgi küçük
             GlassCard(
               child: Text(
                 "Soru: ${widget.question}\n"
                 "Seçim: ${widget.spreadType.label}\n"
-                "Kart seç: ${_picked.length} / $_need",
+                "Kart seç: ${_picked.length} / $_need\n"
+                "readingId: ${widget.readingId}",
                 style: const TextStyle(height: 1.25),
               ),
             ),
-            const SizedBox(height: 10),
 
-            // ✅ SLOT ALANI: küçültülmüş, “deste aşağı kaçmasın”
+            // kırmızı alan yukarı gelsin
+            const SizedBox(height: 8),
+
+            /// ✅ SLOT ALANI:
+            /// - 3 kart: yine yan yana sığar
+            /// - 6/12 kart: yatay scroll + daha kısa yükseklik
+            /// - overflow: Expanded + buffer
             LayoutBuilder(
               builder: (context, c) {
-                const gap = 12.0;
+                const gap = 10.0;
+                const cardAspect = 0.70;
 
-                // Kart oranı (Rider-Waite görselleri dikey kart)
-                const cardAspect = 0.70; // width/height
+                // Kartları küçük tutuyoruz (6/12’de daha da küçülür)
+                final double maxSlotW = (_need <= 3)
+                    ? 150.0
+                    : (_need <= 6)
+                        ? 96.0
+                        : 82.0;
 
-                // Slot kart genişliği: çok büyümesin
-                final rawW = (c.maxWidth - gap * (grid.cols - 1)) / grid.cols;
-                final slotW = math.min(150.00, rawW);
+                // ✅ slotW: ekrana göre akıllı
+                final double idealW =
+                    (c.maxWidth - gap * (_need - 1)) / _need; // hepsi sığarsa bu
+                final double slotW = math.max(
+                  64.0,
+                  math.min(maxSlotW, idealW.isFinite ? idealW : maxSlotW),
+                );
 
-                // Slot kart yüksekliği (oranla)
-                final slotH = slotW / cardAspect;
+                final double cardH = slotW / cardAspect;
 
-                // ✅ Slot alan yüksekliği: “başlık + kart + ufak boşluk” kadar sabit.
-                // 3 kart için tek satır → çok kompakt kalsın.
-                final headerH = 34.0;       // "Seçilen Kartlar" yazısı + spacing
-                final bottomPad = 10.0;
-                final slotAreaH = headerH + slotH + bottomPad;
+                // ✅ OVERFLOW FIX: başlık + boşluk + kart + buffer
+                const headerH = 24.0;
+                const vGap = 8.0;
+                const extraBuffer = 56.0; // 40px taşmayı da rahat yutar
+
+                final slotAreaH = headerH + vGap + cardH + extraBuffer;
 
                 return SizedBox(
                   height: slotAreaH,
                   child: GlassCard(
                     child: Padding(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            "Seçilen Kartlar",
-                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                          const SizedBox(
+                            height: headerH,
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                "Seçilen Kartlar",
+                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900),
+                              ),
+                            ),
                           ),
-                          const SizedBox(height: 10),
+                          const SizedBox(height: vGap),
 
-                          // Slotlar tek satır (need=3) / grid (need>3)
+                          // ✅ Column taşmasın diye Expanded
                           Expanded(
-                            child: Center(
-                              child: SizedBox(
-                                width: math.min(c.maxWidth, (slotW * grid.cols) + gap * (grid.cols - 1)),
-                                child: GridView.builder(
-                                  physics: const NeverScrollableScrollPhysics(),
-                                  padding: EdgeInsets.zero,
-                                  itemCount: _need,
-                                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                                    crossAxisCount: grid.cols,
-                                    crossAxisSpacing: gap,
-                                    mainAxisSpacing: gap,
-                                    childAspectRatio: cardAspect,
-                                  ),
-                                  itemBuilder: (context, i) {
-                                    final hasCard = i < _picked.length;
-                                    final card = hasCard ? _picked[i] : null;
+                            child: Align(
+                              alignment: Alignment.topLeft,
+                              child: ListView.separated(
+                                scrollDirection: Axis.horizontal,
+                                physics: const BouncingScrollPhysics(),
+                                itemCount: _need,
+                                separatorBuilder: (_, __) => const SizedBox(width: gap),
+                                itemBuilder: (context, i) {
+                                  final hasCard = i < _picked.length;
+                                  final card = hasCard ? _picked[i] : null;
 
-                                    return Stack(
+                                  return SizedBox(
+                                    width: slotW,
+                                    child: Stack(
                                       children: [
                                         Positioned.fill(
                                           child: TarotCardTile(
                                             width: slotW,
-                                            height: slotH,
+                                            height: cardH,
                                             card: card,
                                             faceUp: _revealed && hasCard,
                                             disabled: true,
@@ -191,13 +215,14 @@ class _TarotSelectScreenState extends State<TarotSelectScreen> {
                                             badgeLabel: "${i + 1}",
                                           ),
                                         ),
-                                        // pozisyon etiketi (kartın üstüne bindir, yer kaplamasın)
+
+                                        // Pozisyon etiketi
                                         Positioned(
-                                          left: 10,
-                                          right: 10,
-                                          bottom: 10,
+                                          left: 8,
+                                          right: 8,
+                                          bottom: 8,
                                           child: Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                                             decoration: BoxDecoration(
                                               color: Colors.black.withOpacity(0.45),
                                               borderRadius: BorderRadius.circular(12),
@@ -210,16 +235,16 @@ class _TarotSelectScreenState extends State<TarotSelectScreen> {
                                               textAlign: TextAlign.center,
                                               style: TextStyle(
                                                 color: Colors.white.withOpacity(0.85),
-                                                fontSize: 12,
+                                                fontSize: 11,
                                                 fontWeight: FontWeight.w800,
                                               ),
                                             ),
                                           ),
                                         ),
                                       ],
-                                    );
-                                  },
-                                ),
+                                    ),
+                                  );
+                                },
                               ),
                             ),
                           ),
@@ -231,9 +256,10 @@ class _TarotSelectScreenState extends State<TarotSelectScreen> {
               },
             ),
 
-            const SizedBox(height: 10),
+            // deste yukarı
+            const SizedBox(height: 8),
 
-            // ✅ DESTE: kalan alanı komple alsın (slot küçüldü → deste yukarı oturur)
+            /// ✅ DESTE ALANI: daha geniş ve yüksek alan (kırmızı)
             Expanded(
               child: GlassCard(
                 child: Padding(
@@ -246,7 +272,6 @@ class _TarotSelectScreenState extends State<TarotSelectScreen> {
                         style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
                       ),
                       const SizedBox(height: 10),
-
                       Expanded(
                         child: LayoutBuilder(
                           builder: (context, dc) {
@@ -257,7 +282,7 @@ class _TarotSelectScreenState extends State<TarotSelectScreen> {
                             final tileW = (dc.maxWidth - gap * (cols - 1)) / cols;
                             final tileH = tileW / cardAspect;
 
-                            final canPick = !_revealed && _picked.length < _need;
+                            final canPick = !_revealed && _picked.length < _need && !_loading;
 
                             return GridView.builder(
                               padding: EdgeInsets.zero,
@@ -296,14 +321,14 @@ class _TarotSelectScreenState extends State<TarotSelectScreen> {
                 Expanded(
                   child: GradientButton(
                     text: "Kartları Çevir",
-                    onPressed: (_picked.length == _need && !_revealed) ? _reveal : null,
+                    onPressed: (_picked.length == _need && !_revealed && !_loading) ? _reveal : null,
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: GradientButton(
-                    text: "Devam",
-                    onPressed: (_picked.length == _need && _revealed) ? _goResult : null,
+                    text: _loading ? "Kaydediliyor..." : "Devam",
+                    onPressed: (_picked.length == _need && _revealed && !_loading) ? _saveAndGoPayment : null,
                   ),
                 ),
               ],

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../services/tarot_api.dart';
 import '../../widgets/glass_card.dart';
 import '../../widgets/gradient_button.dart';
 import '../../widgets/mystic_scaffold.dart';
@@ -17,16 +18,52 @@ class TarotSpreadSelectScreen extends StatefulWidget {
 
 class _TarotSpreadSelectScreenState extends State<TarotSpreadSelectScreen> {
   TarotSpreadType _type = TarotSpreadType.three;
+  bool _loading = false;
 
-  void _goSelect() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => TarotSelectScreen(
-          question: widget.question,
-          spreadType: _type,
+  String _spreadToApi(TarotSpreadType t) {
+    switch (t) {
+      case TarotSpreadType.three:
+        return "three";
+      case TarotSpreadType.six:
+        return "six";
+      case TarotSpreadType.twelve:
+        return "twelve";
+    }
+  }
+
+  Future<void> _goSelect() async {
+    setState(() => _loading = true);
+    try {
+      // ✅ START -> readingId al
+      final startRes = await TarotApi.start(
+        topic: "Tarot",
+        question: widget.question,
+        name: "Misafir",
+        age: null,
+        spreadType: _spreadToApi(_type),
+      );
+
+      final readingId = (startRes["id"] ?? "").toString();
+      if (readingId.isEmpty) {
+        throw Exception("readingId boş döndü");
+      }
+
+      if (!mounted) return;
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => TarotSelectScreen(
+            readingId: readingId,
+            question: widget.question,
+            spreadType: _type,
+          ),
         ),
-      ),
-    );
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override
@@ -71,7 +108,10 @@ class _TarotSpreadSelectScreenState extends State<TarotSpreadSelectScreen> {
               ),
             ),
             const SizedBox(height: 12),
-            GradientButton(text: 'Kartlara Geç', onPressed: _goSelect),
+            GradientButton(
+              text: _loading ? 'Hazırlanıyor...' : 'Kartlara Geç',
+              onPressed: _loading ? null : _goSelect,
+            ),
           ],
         ),
       ),

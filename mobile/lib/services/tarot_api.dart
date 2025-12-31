@@ -1,51 +1,93 @@
-import 'dart:async';
-import 'package:uuid/uuid.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
-import '../features/tarot/tarot_deck.dart';
-import '../features/tarot/tarot_models.dart';
+import 'api_base.dart';
 
 class TarotApi {
-  static const _uuid = Uuid();
+  static Uri _u(String path) => Uri.parse('${ApiBase.baseUrl}$path');
 
-  /// Şimdilik: “OpenAI yok” => local anlam + pozisyonlara göre mock yorum üretir.
-  static Future<String> generateMockReading({
+  static Future<Map<String, dynamic>> start({
+    required String topic,
     required String question,
-    required TarotSpreadType spreadType,
-    required List<TarotCard> selected,
+    String? name,
+    int? age,
+    required String spreadType, // three/six/twelve
   }) async {
-    await Future.delayed(const Duration(milliseconds: 650));
+    final res = await http.post(
+      _u('/tarot/start'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        "topic": topic,
+        "question": question,
+        "name": name,
+        "age": age,
+        "spread_type": spreadType,
+      }),
+    );
 
-    final positions = spreadType.positionsTr;
-
-    final lines = <String>[];
-    lines.add('Soru: $question');
-    lines.add('');
-    lines.add('Açılım: ${spreadType.label}');
-    lines.add('');
-    lines.add('Seçilen kartlar ve pozisyon anlamları:');
-    lines.add('');
-
-    for (int i = 0; i < selected.length; i++) {
-      final c = selected[i];
-      final pos = positions[i];
-      lines.add('${i + 1}) $pos → ${c.nameTr} (${c.nameEn})');
-      lines.add('   • ${c.shortMeaningTr}');
-      lines.add('   • Anahtarlar: ${c.keywordsTr.take(3).join(", ")}');
-      lines.add('');
+    if (res.statusCode >= 400) {
+      throw Exception('Tarot start failed: ${res.statusCode} ${res.body}');
     }
-
-    lines.add('Not: Şu an yorum “local/mock”. Sonraki adımda backend + OpenAI ile gerçek yoruma geçeceğiz.');
-
-    return lines.join('\n');
+    return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
-  /// Örnek: kart id -> TarotCard (result ekranında yeniden inşa için)
-  static TarotCard? findById(String id) {
-    for (final c in TarotDeck.all) {
-      if (c.id == id) return c;
+  static Future<Map<String, dynamic>> selectCards({
+    required String readingId,
+    required List<String> cards, // id listesi (ör: major_18_moon|R)
+  }) async {
+    final res = await http.post(
+      _u('/tarot/$readingId/select-cards'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({"cards": cards}),
+    );
+
+    if (res.statusCode >= 400) {
+      throw Exception('select-cards failed: ${res.statusCode} ${res.body}');
     }
-    return null;
+    return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
-  static String newId() => _uuid.v4();
+  static Future<Map<String, dynamic>> markPaid({
+    required String readingId,
+    required String paymentRef,
+  }) async {
+    final res = await http.post(
+      _u('/tarot/$readingId/mark-paid'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({"payment_ref": paymentRef}),
+    );
+
+    if (res.statusCode >= 400) {
+      throw Exception('mark-paid failed: ${res.statusCode} ${res.body}');
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  static Future<Map<String, dynamic>> generate({
+    required String readingId,
+  }) async {
+    final res = await http.post(
+      _u('/tarot/$readingId/generate'),
+      headers: {'Content-Type': 'application/json'},
+    );
+
+    if (res.statusCode >= 400) {
+      throw Exception('generate failed: ${res.statusCode} ${res.body}');
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  static Future<Map<String, dynamic>> detail({
+    required String readingId,
+  }) async {
+    final res = await http.get(
+      _u('/tarot/$readingId'),
+      headers: {'Content-Type': 'application/json'},
+    );
+
+    if (res.statusCode >= 400) {
+      throw Exception('detail failed: ${res.statusCode} ${res.body}');
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
 }

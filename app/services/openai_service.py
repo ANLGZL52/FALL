@@ -1,4 +1,6 @@
 # app/services/openai_service.py
+from __future__ import annotations
+
 import base64
 import json
 import os
@@ -298,6 +300,116 @@ def generate_hand_fortune(
         input=[
             {"role": "system", "content": [{"type": "input_text", "text": system}]},
             {"role": "user", "content": [{"type": "input_text", "text": user_text}, *images]},
+        ],
+    )
+
+    out = (resp.output_text or "").strip()
+    if not out:
+        raise RuntimeError("OpenAI boş yanıt döndü. (output_text empty)")
+    return out
+
+from typing import List, Optional
+
+
+from typing import List, Optional
+from openai import OpenAI
+
+from app.core.config import settings
+
+# Senin dosyanda zaten bunlar var:
+# _model_name(), _require_key(), _make_client() vs.
+# Burada _make_client kullanıyorum. Eğer sende adı farklıysa aynı mantıkla değiştir.
+
+def _make_client() -> OpenAI:
+    key = (settings.openai_api_key or "").strip()
+    if not key:
+        raise RuntimeError("OpenAI API key yok. .env içine OPENAI_API_KEY=... yaz ve backend'i yeniden başlat.")
+    return OpenAI(api_key=key)
+
+def _model_name() -> str:
+    m = (settings.openai_model or "").strip()
+    return m or "gpt-4o-mini"
+
+
+def generate_tarot_reading(
+    *,
+    name: str,
+    age: Optional[int],
+    topic: str,
+    question: str,
+    spread_type: str,
+    selected_cards: List[str],
+) -> str:
+    """
+    Tarot yorum üretir (derin + uzun + pozisyon bazlı).
+    selected_cards: Flutter’dan gelen kart id listesi (örn: major_18_moon vb.)
+    """
+    client = _make_client()
+
+    spread_positions = {
+        "one": ["Ana Mesaj"],
+        "three": ["Geçmiş", "Şimdi", "Yakın Gelecek"],
+        "six": ["Sen", "Karşı Taraf", "Aranız", "Engel", "Tavsiye", "Sonuç"],
+        "twelve": [
+            "Genel enerji", "Kök sebep", "Bilinçaltı", "Geçmiş etkisi", "Şu an", "Yakın gelecek",
+            "Senin tutumun", "Çevre", "Umut/Korku", "Sonuç", "Ek mesaj", "Kapanış"
+        ],
+        "five": ["Geçmiş", "Şimdi", "Gizli Etki", "Tavsiye", "Sonuç"],  # eski destek
+    }
+
+    positions = spread_positions.get(spread_type, ["Pozisyon"] * len(selected_cards))
+
+    # kart listesi -> pozisyonla eşle
+    pair_lines = []
+    for i, c in enumerate(selected_cards):
+        pos = positions[i] if i < len(positions) else f"Pozisyon {i+1}"
+        pair_lines.append(f"- {pos}: {c}")
+
+    # ✅ Sistemi “derin” yapıyoruz
+    system = f"""
+Sen üst düzey deneyimli bir Tarot yorumcususun.
+Dil: Türkçe.
+Üslup: mistik + samimi + akıcı; ama kesin hüküm, garanti, teşhis, korkutma yok.
+Amaç: Kullanıcı "sığ" demesin. Yorum DERİN, katmanlı, içgörülü olacak.
+
+KATI KURALLAR:
+- En az 900 kelime yaz (tercihen 1100-1400).
+- Başlıklar kullanabilirsin ama BOMBOŞ şablon gibi olmasın; içerik dolu olsun.
+- Kartları mutlaka POZİSYONLARA göre yorumla. Her pozisyon için min 5-8 cümle (3 kartta bile).
+- "Konu" ve "Soru"ya direkt cevap veren en az 3 ayrı paragraf üret.
+- Uydurma olay anlatma (“şu gün şu kişi mesaj atacak” gibi net kehanet yok).
+- Finans/hukuk/sağlık alanlarında kesin yönlendirme yok; “ihtimal / dikkat / genel öneri” dili kullan.
+- Son kısımda: 7 günlük mini aksiyon planı (gün gün) yaz ama madde değil; kısa paragraflar halinde.
+- En sonda 1 cümle “Olumlama” ver.
+
+İÇERİK DERİNLİĞİ:
+- Kartlar arası bağ kur: çelişki/uyum, tekrar eden temalar, element dengesi (genel).
+- Eğer belirsizlik varsa “bu kısım net değil” demeden, olasılıklarla açıkla.
+"""
+
+    user_text = f"""
+Danışan: {name}{f" ({age})" if age is not None else ""}
+Konu: {topic}
+Soru: {question}
+Açılım: {spread_type}
+Kartlar (pozisyona göre):
+{chr(10).join(pair_lines)}
+
+İSTEK:
+1) İlk paragrafta soruyu yeniden çerçevele: aslında neyi merak ediyor olabilir?
+2) Sonra kartları pozisyon pozisyon yorumla (her pozisyona derin).
+3) Ardından "Büyük Resim" bölümünde temaları birleştir.
+4) "Zaman Enerjisi" bölümünde yakın vade (0-4 hafta) / orta (1-3 ay) / uzun (3-6 ay) diye akış ver.
+5) "Dikkat / Gölge Taraf" bölümünde yumuşak uyarılar ver.
+6) "7 Günlük Mini Plan" bölümünü paragraf paragraf yaz (gün gün).
+7) Tek cümlelik olumlama ile bitir.
+"""
+
+    resp = client.responses.create(
+        model=_model_name(),
+        input=[
+            {"role": "system", "content": [{"type": "input_text", "text": system}]},
+            {"role": "user", "content": [{"type": "input_text", "text": user_text}]},
         ],
     )
 
