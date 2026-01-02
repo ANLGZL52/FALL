@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 from typing import Generator
-from sqlmodel import SQLModel, Session, create_engine
 from sqlalchemy import text
+from sqlmodel import SQLModel, Session, create_engine
 
 from app.core.config import settings
 
 # ✅ MODELLERİ MUTLAKA IMPORT ET (create_all için şart)
-from app.models.coffee_db import CoffeeReadingDB
-from app.models.hand_db import HandReadingDB
-from app.models.tarot_db import TarotReadingDB
+from app.models.coffee_db import CoffeeReadingDB  # noqa: F401
+from app.models.hand_db import HandReadingDB      # noqa: F401
+from app.models.tarot_db import TarotReadingDB    # noqa: F401
+from app.models.numerology_db import NumerologyReadingDB  # noqa: F401
+
 
 engine = create_engine(
     settings.database_url,
@@ -24,7 +26,7 @@ def get_session() -> Generator[Session, None, None]:
 
 
 def init_db() -> None:
-    # ✅ hangi db'ye bağlıyız? (çok kritik debug)
+    # ✅ hangi db'ye bağlıyız? (debug)
     try:
         with engine.connect() as conn:
             db_file = conn.execute(text("PRAGMA database_list;")).fetchall()
@@ -39,6 +41,7 @@ def init_db() -> None:
     # ✅ sqlite ise mini migration
     ensure_hand_schema()
     ensure_tarot_schema()
+    ensure_numerology_schema()
 
 
 # -------------------------
@@ -69,7 +72,6 @@ def _sqlite_has_column(table: str, column: str) -> bool:
 # -------------------------
 
 def ensure_hand_schema() -> None:
-    # sadece sqlite için mini migration
     if not settings.database_url.startswith("sqlite"):
         return
 
@@ -79,7 +81,6 @@ def ensure_hand_schema() -> None:
 
     alters: list[str] = []
 
-    # ✅ senin backend kodlarının bekledikleri
     if not _sqlite_has_column(table, "dominant_hand"):
         alters.append("ALTER TABLE hand_readings ADD COLUMN dominant_hand VARCHAR;")
     if not _sqlite_has_column(table, "photo_hand"):
@@ -89,7 +90,6 @@ def ensure_hand_schema() -> None:
     if not _sqlite_has_column(table, "big_decision"):
         alters.append("ALTER TABLE hand_readings ADD COLUMN big_decision VARCHAR;")
 
-    # (opsiyonel) bazı eski şemalarda yoksa ekle
     if not _sqlite_has_column(table, "updated_at"):
         alters.append("ALTER TABLE hand_readings ADD COLUMN updated_at DATETIME;")
     if not _sqlite_has_column(table, "created_at"):
@@ -109,7 +109,6 @@ def ensure_hand_schema() -> None:
 # -------------------------
 
 def ensure_tarot_schema() -> None:
-    # sadece sqlite için mini migration
     if not settings.database_url.startswith("sqlite"):
         return
 
@@ -119,7 +118,6 @@ def ensure_tarot_schema() -> None:
 
     alters: list[str] = []
 
-    # ✅ Tarot için route/schema uyumluluğu
     if not _sqlite_has_column(table, "payment_ref"):
         alters.append("ALTER TABLE tarot_readings ADD COLUMN payment_ref VARCHAR;")
     if not _sqlite_has_column(table, "rating"):
@@ -138,3 +136,38 @@ def ensure_tarot_schema() -> None:
         print(f"[DB] tarot_readings altered: {len(alters)} changes applied.")
     else:
         print("[DB] tarot_readings schema OK.")
+
+
+# -------------------------
+# NUMEROLOGY SCHEMA (SQLITE)
+# -------------------------
+
+def ensure_numerology_schema() -> None:
+    if not settings.database_url.startswith("sqlite"):
+        return
+
+    table = "numerology_readings"
+    if not _sqlite_has_table(table):
+        return
+
+    alters: list[str] = []
+
+    # ödeme / rating / timestamps garanti
+    if not _sqlite_has_column(table, "payment_ref"):
+        alters.append("ALTER TABLE numerology_readings ADD COLUMN payment_ref VARCHAR;")
+    if not _sqlite_has_column(table, "rating"):
+        alters.append("ALTER TABLE numerology_readings ADD COLUMN rating INTEGER;")
+    if not _sqlite_has_column(table, "result_text"):
+        alters.append("ALTER TABLE numerology_readings ADD COLUMN result_text VARCHAR;")
+    if not _sqlite_has_column(table, "updated_at"):
+        alters.append("ALTER TABLE numerology_readings ADD COLUMN updated_at DATETIME;")
+    if not _sqlite_has_column(table, "created_at"):
+        alters.append("ALTER TABLE numerology_readings ADD COLUMN created_at DATETIME;")
+
+    if alters:
+        with engine.begin() as conn:
+            for stmt in alters:
+                conn.execute(text(stmt))
+        print(f"[DB] numerology_readings altered: {len(alters)} changes applied.")
+    else:
+        print("[DB] numerology_readings schema OK.")

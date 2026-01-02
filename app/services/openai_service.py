@@ -15,12 +15,38 @@ from app.core.config import settings
 # -------------------------
 
 def _require_key() -> str:
-    key = (settings.openai_api_key or "").strip()
+    key = (getattr(settings, "openai_api_key", "") or "").strip()
     if not key:
         raise RuntimeError(
             "OpenAI API key yok. .env içine OPENAI_API_KEY=... yaz ve backend'i yeniden başlat."
         )
     return key
+
+
+def _make_client() -> OpenAI:
+    return OpenAI(api_key=_require_key())
+
+
+def _text_model_name() -> str:
+    """
+    Config uyumsuzluklarına dayanıklı:
+    - settings.openai_model varsa onu kullanır (OPENAI_MODEL)
+    - yoksa settings.openai_model_text varsa onu kullanır (OPENAI_MODEL_TEXT)
+    - ikisi de yoksa fallback
+    """
+    m = (getattr(settings, "openai_model", "") or "").strip()
+    if m:
+        return m
+    mt = (getattr(settings, "openai_model_text", "") or "").strip()
+    return mt or "gpt-4.1-mini"
+
+
+def _vision_model_name() -> str:
+    mv = (getattr(settings, "openai_model_vision", "") or "").strip()
+    if mv:
+        return mv
+    m = (getattr(settings, "openai_model", "") or "").strip()
+    return m or "gpt-4.1-mini"
 
 
 def _normalize_path(p: str) -> str:
@@ -48,10 +74,6 @@ def _to_data_url(path: str) -> str:
 
 
 def _parse_json_object(text: str) -> Optional[dict]:
-    """
-    Model bazen JSON'u '```json ... ```' gibi sarmalayabiliyor veya etrafına yazı koyabiliyor.
-    Bu fonksiyon hem direkt json.loads dener, hem de { ... } aralığını ayıklar.
-    """
     if not text:
         return None
     t = text.strip()
@@ -68,7 +90,7 @@ def _parse_json_object(text: str) -> Optional[dict]:
     start = t.find("{")
     end = t.rfind("}")
     if start != -1 and end != -1 and end > start:
-        candidate = t[start: end + 1]
+        candidate = t[start:end + 1]
         try:
             obj = json.loads(candidate)
             if isinstance(obj, dict):
@@ -79,27 +101,36 @@ def _parse_json_object(text: str) -> Optional[dict]:
     return None
 
 
-def _make_client() -> OpenAI:
-    key = _require_key()
-    return OpenAI(api_key=key)
+# -------------------------
+# ✅ Text-only OpenAI call (NUMEROLOGY / TAROT)
+# -------------------------
+
+def call_openai_text(*, system: str, user: str) -> str:
+    client = _make_client()
+    resp = client.responses.create(
+        model=_text_model_name(),
+        input=[
+            {"role": "system", "content": [{"type": "input_text", "text": system}]},
+            {"role": "user", "content": [{"type": "input_text", "text": user}]},
+        ],
+    )
+    out = (resp.output_text or "").strip()
+    if not out:
+        raise RuntimeError("OpenAI boş yanıt döndü. (output_text empty)")
+    return out
 
 
-def _model_name() -> str:
-    # settings.openai_model senin mevcut kahve fonksiyonunda zaten kullanılıyor
-    m = (settings.openai_model or "").strip()
-    if not m:
-        # fallback (istersen default’u config’te ver)
-        m = "gpt-4o-mini"
-    return m
+# ✅ GERİ UYUMLULUK: bazı dosyalar eski isimle çağırıyor olabilir
+def _call_openai_text(*, system: str, user: str) -> str:
+    return call_openai_text(system=system, user=user)
 
 
 # -------------------------
-# Coffee (Mevcut çalışan)
+# Coffee
 # -------------------------
 
 def validate_coffee_images(image_paths: List[str]) -> Dict[str, Any]:
     client = _make_client()
-
     images = [{"type": "input_image", "image_url": _to_data_url(p)} for p in image_paths[:5]]
 
     prompt = (
@@ -114,10 +145,8 @@ def validate_coffee_images(image_paths: List[str]) -> Dict[str, Any]:
     )
 
     resp = client.responses.create(
-        model=_model_name(),
-        input=[
-            {"role": "user", "content": [{"type": "input_text", "text": prompt}, *images]}
-        ],
+        model=_vision_model_name(),
+        input=[{"role": "user", "content": [{"type": "input_text", "text": prompt}, *images]}],
     )
 
     raw = (resp.output_text or "").strip()
@@ -151,17 +180,14 @@ def generate_fortune(
 
     system = (
         "Sen deneyimli bir kahve falcısısın.\n"
-        "Ton: samimi, sıcak, falcı edasında; sanki karşındaki kişiyle yüz yüze konuşuyorsun.\n"
-        "Hitap serbest: 'canım', 'güzelim', 'kuzum', 'tatlım' gibi (abartmadan, her paragrafta 1 kez yeter).\n"
-        "Biçim: KESİNLİKLE madde işareti, numaralı liste, A) B) başlıkları, şablon formatlar YOK.\n"
-        "Sadece düz yazı: 6-9 paragraf. Her paragraf 3-6 cümle.\n\n"
-        "Kural-1 (ÇOK ÖNEMLİ): UYDURMA YOK. Sadece görselde gerçekten seçilebilen telve izlerine dayan.\n"
-        "Belirsizse 'tam seçilmiyor' de. Şekil uydurma.\n"
-        "Kural-2: Kesin hüküm yok; olasılık dili: 'gibi', 'sanki', 'işaret ediyor olabilir'.\n"
-        "Kural-3: Kullanıcının seçtiği konu ve soruya en az 2 paragraf direkt cevap ver.\n"
-        "Kural-4: Korkutma yok; negatif şeyleri yumuşak uyarı gibi söyle.\n\n"
-        "Üslup detayı: Metin akıcı olsun; kısa kısa değil, fal anlatır gibi sahne kur.\n"
-        "Araya mini sezgisel cümleler kat: 'İçime doğan şu…', 'Burada bir işaret var…' gibi.\n\n"
+        "Ton: samimi, sıcak, falcı edasında.\n"
+        "Biçim: KESİNLİKLE madde işareti/numara/başlık yok.\n"
+        "Sadece düz yazı: 6-9 paragraf.\n\n"
+        "Kural-1: UYDURMA YOK. Sadece görselde gerçekten seçilebilen telve izlerine dayan.\n"
+        "Belirsizse 'tam seçilmiyor' de.\n"
+        "Kural-2: Kesin hüküm yok; olasılık dili.\n"
+        "Kural-3: Konu ve soruya en az 2 paragraf direkt cevap ver.\n"
+        "Kural-4: Korkutma yok.\n\n"
         "Uzunluk: en az 750 kelime.\n"
         "Dil: Türkçe.\n\n"
         "Eğer görseller kahve fincanı içi değilse: sadece şu tek cümleyi yaz ve dur:\n"
@@ -174,15 +200,11 @@ def generate_fortune(
         f"Soru: {question}\n"
         f"İlişki durumu: {relationship_status or 'belirtilmedi'}\n"
         f"Büyük karar: {big_decision or 'belirtilmedi'}\n\n"
-        "İstek:\n"
-        "Fincandaki telve izlerini önce zihninde 'görüntü' gibi tarif ederek anlat ama bunu listeleme.\n"
-        "Ardından bu izlerin enerjisini yorumla: yakın vade / orta vade / uzun vade akışını paragraf içinde yedir.\n"
-        "Son 1 paragrafta küçük bir 'niyet/ritüel/odak önerisi' ver (dini zorlama yok).\n"
-        "Tekrar: LİSTE, MADDE, BAŞLIK KULLANMA.\n"
+        "İstek: Akıcı bir fal yaz. Listeleme yapma.\n"
     )
 
     resp = client.responses.create(
-        model=_model_name(),
+        model=_vision_model_name(),
         input=[
             {"role": "system", "content": [{"type": "input_text", "text": system}]},
             {"role": "user", "content": [{"type": "input_text", "text": user_text}, *images]},
@@ -196,32 +218,26 @@ def generate_fortune(
 
 
 # -------------------------
-# HAND (SENİN İSTEDİĞİN ŞEKİLDE - EKLENDİ)
+# Hand
 # -------------------------
 
 def validate_hand_images(image_paths: List[str]) -> Dict[str, Any]:
-    """
-    Amaç: Ödeme öncesi "el/avuç içi" mi? Değilse reddet.
-    Sıkı kural: En az 1 görsel net şekilde avuç içi/elin çizgilerini göstermeli.
-    Dönen format kahve ile aynı: ok/reason/confidence
-    """
     client = _make_client()
-
     images = [{"type": "input_image", "image_url": _to_data_url(p)} for p in image_paths[:5]]
 
     prompt = (
         "Sen bir görüntü doğrulama denetçisisin.\n"
         "Görev: Yüklenen görseller 'EL FALI' için uygun mu?\n\n"
-        "Uygun (ok=true): Avuç içi net (palm) + el çizgileri görünür + el fotoğrafı.\n"
-        "Uygun değil (ok=false): kimlik/ehliyet, yüz, ekran görüntüsü, belge, kahve fincanı, manzara, ürün, yazı ağırlıklı görsel.\n\n"
-        "Kural: En az 1 görsel bile avuç içi net değilse veya el yoksa ok=false.\n"
+        "Uygun (ok=true): Avuç içi net (palm) + çizgiler görünür.\n"
+        "Uygun değil (ok=false): kimlik/ehliyet, yüz, ekran görüntüsü, belge, kahve fincanı, manzara, ürün.\n\n"
+        "Kural: En az 1 görsel avuç içi net değilse ok=false.\n"
         "Sadece JSON döndür:\n"
         '{"ok": true/false, "reason": "kısa açıklama", "confidence": 0-1}\n'
         "JSON DIŞINDA hiçbir şey yazma."
     )
 
     resp = client.responses.create(
-        model=_model_name(),
+        model=_vision_model_name(),
         input=[{"role": "user", "content": [{"type": "input_text", "text": prompt}, *images]}],
     )
 
@@ -229,11 +245,10 @@ def validate_hand_images(image_paths: List[str]) -> Dict[str, Any]:
     obj = _parse_json_object(raw)
 
     if not obj:
-        # ödeme güvenliği için sıkı davran
         return {"ok": False, "reason": "Görseller doğrulanamadı. Lütfen avuç içi net fotoğraf yükle.", "confidence": 0.0}
 
     ok = bool(obj.get("ok", False))
-    reason = str(obj.get("reason", "")).strip() or ("Uygun" if ok else "Görseller el falı için uygun değil (avuç içi net değil).")
+    reason = str(obj.get("reason", "")).strip() or ("Uygun" if ok else "Görseller el falı için uygun değil.")
     conf = obj.get("confidence", 0.5)
     try:
         conf = float(conf)
@@ -254,31 +269,15 @@ def generate_hand_fortune(
     relationship_status: Optional[str] = None,
     big_decision: Optional[str] = None,
 ) -> str:
-    """
-    Backend'in kontrol ettiği kritik cümle:
-    El değilse -> SADECE şu cümleyi döndür:
-    'Görseller el fotoğrafı gibi görünmüyor.'
-    """
     client = _make_client()
     images = [{"type": "input_image", "image_url": _to_data_url(p)} for p in image_paths[:5]]
 
-    # Kahvedeki gibi: liste/başlık yok, akıcı anlatı
     system = (
         "Sen deneyimli bir el falcısısın.\n"
-        "Ton: samimi, mistik, falcı edasında; ama abartısız ve kesin hüküm vermeyen.\n"
-        "Biçim: KESİNLİKLE madde işareti, numaralı liste, başlık, A) B) yok.\n"
-        "Sadece düz yazı: 6-9 paragraf. Her paragraf 3-6 cümle.\n\n"
-        "Kural-1: Uydurma yok. Görselde seçilebilen çizgilere/işaretlere dayan.\n"
-        "Emin olmadığın yerde 'tam seçilmiyor / net değil' de.\n"
-        "Kural-2: Kesin hüküm yok; olasılık dili kullan.\n"
-        "Kural-3: Kullanıcının konu ve sorusuna en az 2 paragraf direkt cevap ver.\n"
-        "Kural-4: Korkutma yok; negatif şeyleri yumuşak uyarı gibi söyle.\n\n"
-        "İçerik akışı: kısa giriş -> çizgiler (görünüyorsa yaşam/akıl/kalp/kader) -> "
-        "tepecikler (Venüs/Jüpiter/Satürn/Apollo/Merkür) -> zamanlama (0-4 hafta, 1-3 ay, 3-6 ay) -> "
-        "kapanışta küçük bir odak/niyet önerisi.\n\n"
         "Dil: Türkçe.\n"
-        "Uzunluk: en az 650 kelime.\n\n"
-        "ÇOK ÖNEMLİ: Eğer görseller el/avuç içi fotoğrafı gibi görünmüyorsa, sadece şu tek cümleyi yaz ve dur:\n"
+        "Biçim: liste/başlık yok, düz yazı.\n"
+        "Uydurma yok, olasılık dili.\n"
+        "Eğer görseller el/avuç içi gibi görünmüyorsa, sadece şu tek cümleyi yaz ve dur:\n"
         "'Görseller el fotoğrafı gibi görünmüyor.'\n"
     )
 
@@ -289,14 +288,12 @@ def generate_hand_fortune(
         f"Baskın el: {dominant_hand or 'belirtilmedi'}\n"
         f"Fotoğraftaki el: {photo_hand or 'belirtilmedi'}\n"
         f"İlişki durumu: {relationship_status or 'belirtilmedi'}\n"
-        f"Büyük karar: {big_decision or 'belirtilmedi'}\n\n"
-        "İstek:\n"
-        "Avuç içi çizgilerini gözlemle ve falcı üslubuyla akıcı bir yorum yaz. "
-        "Listeleme yapma, başlık atma.\n"
+        f"Büyük karar: {big_decision or 'belirtilmedi'}\n"
+        "İstek: Akıcı bir yorum yaz.\n"
     )
 
     resp = client.responses.create(
-        model=_model_name(),
+        model=_vision_model_name(),
         input=[
             {"role": "system", "content": [{"type": "input_text", "text": system}]},
             {"role": "user", "content": [{"type": "input_text", "text": user_text}, *images]},
@@ -308,28 +305,10 @@ def generate_hand_fortune(
         raise RuntimeError("OpenAI boş yanıt döndü. (output_text empty)")
     return out
 
-from typing import List, Optional
 
-
-from typing import List, Optional
-from openai import OpenAI
-
-from app.core.config import settings
-
-# Senin dosyanda zaten bunlar var:
-# _model_name(), _require_key(), _make_client() vs.
-# Burada _make_client kullanıyorum. Eğer sende adı farklıysa aynı mantıkla değiştir.
-
-def _make_client() -> OpenAI:
-    key = (settings.openai_api_key or "").strip()
-    if not key:
-        raise RuntimeError("OpenAI API key yok. .env içine OPENAI_API_KEY=... yaz ve backend'i yeniden başlat.")
-    return OpenAI(api_key=key)
-
-def _model_name() -> str:
-    m = (settings.openai_model or "").strip()
-    return m or "gpt-4o-mini"
-
+# -------------------------
+# Tarot (text-only)
+# -------------------------
 
 def generate_tarot_reading(
     *,
@@ -340,80 +319,60 @@ def generate_tarot_reading(
     spread_type: str,
     selected_cards: List[str],
 ) -> str:
-    """
-    Tarot yorum üretir (derin + uzun + pozisyon bazlı).
-    selected_cards: Flutter’dan gelen kart id listesi (örn: major_18_moon vb.)
-    """
-    client = _make_client()
-
-    spread_positions = {
-        "one": ["Ana Mesaj"],
-        "three": ["Geçmiş", "Şimdi", "Yakın Gelecek"],
-        "six": ["Sen", "Karşı Taraf", "Aranız", "Engel", "Tavsiye", "Sonuç"],
-        "twelve": [
-            "Genel enerji", "Kök sebep", "Bilinçaltı", "Geçmiş etkisi", "Şu an", "Yakın gelecek",
-            "Senin tutumun", "Çevre", "Umut/Korku", "Sonuç", "Ek mesaj", "Kapanış"
-        ],
-        "five": ["Geçmiş", "Şimdi", "Gizli Etki", "Tavsiye", "Sonuç"],  # eski destek
-    }
-
-    positions = spread_positions.get(spread_type, ["Pozisyon"] * len(selected_cards))
-
-    # kart listesi -> pozisyonla eşle
-    pair_lines = []
-    for i, c in enumerate(selected_cards):
-        pos = positions[i] if i < len(positions) else f"Pozisyon {i+1}"
-        pair_lines.append(f"- {pos}: {c}")
-
-    # ✅ Sistemi “derin” yapıyoruz
-    system = f"""
-Sen üst düzey deneyimli bir Tarot yorumcususun.
-Dil: Türkçe.
-Üslup: mistik + samimi + akıcı; ama kesin hüküm, garanti, teşhis, korkutma yok.
-Amaç: Kullanıcı "sığ" demesin. Yorum DERİN, katmanlı, içgörülü olacak.
-
-KATI KURALLAR:
-- En az 900 kelime yaz (tercihen 1100-1400).
-- Başlıklar kullanabilirsin ama BOMBOŞ şablon gibi olmasın; içerik dolu olsun.
-- Kartları mutlaka POZİSYONLARA göre yorumla. Her pozisyon için min 5-8 cümle (3 kartta bile).
-- "Konu" ve "Soru"ya direkt cevap veren en az 3 ayrı paragraf üret.
-- Uydurma olay anlatma (“şu gün şu kişi mesaj atacak” gibi net kehanet yok).
-- Finans/hukuk/sağlık alanlarında kesin yönlendirme yok; “ihtimal / dikkat / genel öneri” dili kullan.
-- Son kısımda: 7 günlük mini aksiyon planı (gün gün) yaz ama madde değil; kısa paragraflar halinde.
-- En sonda 1 cümle “Olumlama” ver.
-
-İÇERİK DERİNLİĞİ:
-- Kartlar arası bağ kur: çelişki/uyum, tekrar eden temalar, element dengesi (genel).
-- Eğer belirsizlik varsa “bu kısım net değil” demeden, olasılıklarla açıkla.
-"""
-
-    user_text = f"""
-Danışan: {name}{f" ({age})" if age is not None else ""}
-Konu: {topic}
-Soru: {question}
-Açılım: {spread_type}
-Kartlar (pozisyona göre):
-{chr(10).join(pair_lines)}
-
-İSTEK:
-1) İlk paragrafta soruyu yeniden çerçevele: aslında neyi merak ediyor olabilir?
-2) Sonra kartları pozisyon pozisyon yorumla (her pozisyona derin).
-3) Ardından "Büyük Resim" bölümünde temaları birleştir.
-4) "Zaman Enerjisi" bölümünde yakın vade (0-4 hafta) / orta (1-3 ay) / uzun (3-6 ay) diye akış ver.
-5) "Dikkat / Gölge Taraf" bölümünde yumuşak uyarılar ver.
-6) "7 Günlük Mini Plan" bölümünü paragraf paragraf yaz (gün gün).
-7) Tek cümlelik olumlama ile bitir.
-"""
-
-    resp = client.responses.create(
-        model=_model_name(),
-        input=[
-            {"role": "system", "content": [{"type": "input_text", "text": system}]},
-            {"role": "user", "content": [{"type": "input_text", "text": user_text}]},
-        ],
+    system = (
+        "Sen üst düzey deneyimli bir Tarot yorumcususun.\n"
+        "Dil: Türkçe.\n"
+        "Derin, katmanlı, içgörülü yaz.\n"
+        "Kesin kehanet yok.\n"
     )
 
-    out = (resp.output_text or "").strip()
-    if not out:
-        raise RuntimeError("OpenAI boş yanıt döndü. (output_text empty)")
-    return out
+    user = (
+        f"Danışan: {name}{f' ({age})' if age is not None else ''}\n"
+        f"Konu: {topic}\n"
+        f"Soru: {question}\n"
+        f"Açılım: {spread_type}\n"
+        f"Kartlar: {', '.join(selected_cards)}\n"
+        "İstek: Pozisyon bazlı derin yorum.\n"
+    )
+
+    return call_openai_text(system=system, user=user)
+
+
+# -------------------------
+# ✅ Numerology (text-only)
+# -------------------------
+
+def generate_numerology_reading(
+    *,
+    name: str,
+    birth_date: str,   # YYYY-MM-DD
+    topic: str,
+    question: Optional[str] = None,
+) -> str:
+    q = (question or "").strip() or "Genel numeroloji yorumu istiyorum."
+
+    system = (
+        "Sen profesyonel bir numeroloji uzmanısın.\n"
+        "Dil: Türkçe.\n"
+        "Üslup: sıcak, mistik ama boş genelleme yok; somut ve açıklayıcı.\n"
+        "Korkutma yok, kesin hüküm yok.\n"
+        "Uzunluk: en az 650-900 kelime bandında.\n"
+    )
+
+    user = f"""
+Kullanıcı bilgileri:
+- Ad: {name}
+- Doğum tarihi: {birth_date}
+- Konu: {topic}
+- Soru: {q}
+
+İstenen içerik:
+1) Kısa özet (3-5 cümle)
+2) Yaşam Yolu sayısını doğum tarihinden hesapla ve kısa adımlarla göster.
+   Master sayılar (11/22/33) gelirse koru.
+3) Konu özel yorum (güçlü yanlar, dikkat edilmesi gerekenler, uygulanabilir öneriler)
+4) 7 günlük mini enerji takvimi (gün gün kısa)
+5) Kapanış: motive edici tek paragraf.
+"""
+    # burada call_openai_text kullanıyoruz; ama eski yerler _call_openai_text çağırsa da wrapper var
+    return call_openai_text(system=system, user=user)

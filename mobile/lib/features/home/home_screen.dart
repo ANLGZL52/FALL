@@ -6,9 +6,8 @@ import '../../widgets/mystic_scaffold.dart';
 
 import '../coffee/coffee_screen.dart';
 import '../hand/hand_screen.dart';
-
-// ✅ Tarot intro ekranı
 import '../tarot/tarot_intro_screen.dart';
+import '../numerology/numerology_intro_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -28,6 +27,13 @@ class HomeScreen extends StatelessWidget {
   void _openTarot(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const TarotIntroScreen()),
+    );
+  }
+
+  void _openNumerology(BuildContext context) {
+    debugPrint("[NAV] Numerology tapped");
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const NumerologyIntroScreen()),
     );
   }
 
@@ -59,6 +65,8 @@ class HomeScreen extends StatelessWidget {
                 ],
               ),
             ),
+
+            // ✅ Kartlar listesi (scroll alanı)
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -80,7 +88,6 @@ class HomeScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
 
-                    // ✅ Tarot tıklanabilir
                     FeatureCard(
                       title: 'Tarot',
                       subtitle: '3 - 6 - 12 kart açılımları.',
@@ -89,16 +96,19 @@ class HomeScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
 
-                    // Şimdilik pasif
-                    const FeatureCard(
+                    // ✅ Numeroloji tıklanabilir
+                    FeatureCard(
                       title: 'Numeroloji',
                       subtitle: 'Yaşam sayısı, kader sayısı ve daha fazlası.',
                       icon: Icons.auto_awesome_outlined,
+                      onTap: () => _openNumerology(context),
                     ),
                   ],
                 ),
               ),
             ),
+
+            // ✅ Bottom bar (ListView’in dışına alındı)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
               decoration: BoxDecoration(

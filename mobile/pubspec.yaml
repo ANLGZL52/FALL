@@ -11,19 +11,19 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # iOS-tarzı ikonlar
   cupertino_icons: ^1.0.8
-
-  # 📡 Backend’e istek atmak için
   http: ^1.2.2
-
-  # 📷 Kamera / galeri ile fotoğraf almak için
   image_picker: ^1.1.2
+
+  flutter_localizations:
+    sdk: flutter
+
+  # ✅ Flutter SDK bunu 0.20.2'ye pinliyor
+  intl: ^0.20.2
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-
   flutter_lints: ^5.0.0
 
 flutter:
