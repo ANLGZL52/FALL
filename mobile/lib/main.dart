@@ -4,6 +4,9 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'core/app_theme.dart';
 import 'features/home/home_screen.dart';
 
+// ✅ Synastry
+import 'features/synastry/synastry_intro_screen.dart';
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const FallApp());
@@ -34,6 +37,11 @@ class FallApp extends StatelessWidget {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
+
+      // ✅ Named routes (home’u bozmadan ekledik)
+      routes: {
+        '/synastry': (_) => const SynastryIntroScreen(),
+      },
     );
   }
 }

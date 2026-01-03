@@ -9,43 +9,48 @@ import '../hand/hand_screen.dart';
 import '../tarot/tarot_intro_screen.dart';
 import '../numerology/numerology_intro_screen.dart';
 
-// ✅ NEW: Doğum Haritası
+// ✅ Doğum Haritası
 import '../birthchart/birthchart_intro_screen.dart';
+
+// ✅ Kişilik Analizi
+import '../personality/personality_intro_screen.dart';
+
+// ✅ NEW: Sinastri (Aşk Uyumu)
+import '../synastry/synastry_intro_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
   void _openCoffee(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const CoffeeScreen()),
-    );
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CoffeeScreen()));
   }
 
   void _openHand(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const HandScreen()),
-    );
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const HandScreen()));
   }
 
   void _openTarot(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const TarotIntroScreen()),
-    );
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TarotIntroScreen()));
   }
 
   void _openNumerology(BuildContext context) {
     debugPrint("[NAV] Numerology tapped");
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const NumerologyIntroScreen()),
-    );
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NumerologyIntroScreen()));
   }
 
-  // ✅ NEW
   void _openBirthChart(BuildContext context) {
     debugPrint("[NAV] BirthChart tapped");
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const BirthChartIntroScreen()),
-    );
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BirthChartIntroScreen()));
+  }
+
+  void _openPersonality(BuildContext context) {
+    debugPrint("[NAV] Personality tapped");
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PersonalityIntroScreen()));
+  }
+
+  void _openSynastry(BuildContext context) {
+    debugPrint("[NAV] Synastry tapped");
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SynastryIntroScreen()));
   }
 
   @override
@@ -119,12 +124,29 @@ class HomeScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
 
-                    // ✅ NEW: Doğum Haritası
                     FeatureCard(
                       title: 'Doğum Haritası',
                       subtitle: 'Doğum tarihi, yer ve (opsiyonel) saat ile analiz.',
                       icon: Icons.public_outlined,
                       onTap: () => _openBirthChart(context),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // ✅ Kişilik Analizi
+                    FeatureCard(
+                      title: 'Kişilik Analizi',
+                      subtitle: 'Numeroloji + Doğum Haritası birleşik rapor + PDF indir.',
+                      icon: Icons.psychology_alt_outlined,
+                      onTap: () => _openPersonality(context),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // ✅ NEW: Sinastri (Aşk Uyumu)
+                    FeatureCard(
+                      title: 'Sinastri (Aşk Uyumu)',
+                      subtitle: 'İki kişinin doğum bilgileriyle uyum analizi + PDF rapor.',
+                      icon: Icons.favorite_outline,
+                      onTap: () => _openSynastry(context),
                     ),
                   ],
                 ),

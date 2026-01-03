@@ -49,6 +49,21 @@ def _vision_model_name() -> str:
     return m or "gpt-4.1-mini"
 
 
+def _max_output_tokens(default: int = 2500) -> int:
+    """
+    Uzun metin (çok sayfa PDF) için.
+    .env -> OPENAI_MAX_OUTPUT_TOKENS=3000 gibi ayarlanabilir.
+    Not: Çok yüksek verirsen maliyet + latency artar.
+    """
+    v = getattr(settings, "openai_max_output_tokens", None)
+    try:
+        if v is None:
+            return int(default)
+        return int(v)
+    except Exception:
+        return int(default)
+
+
 def _normalize_path(p: str) -> str:
     if os.path.isabs(p):
         return p
@@ -100,13 +115,18 @@ def _parse_json_object(text: str) -> Optional[dict]:
 
 
 # -------------------------
-# ✅ Text-only OpenAI call (TAROT / NUMEROLOGY / BIRTHCHART)
+# ✅ Text-only OpenAI call
 # -------------------------
 
-def call_openai_text(*, system: str, user: str) -> str:
+def call_openai_text(*, system: str, user: str, max_output_tokens: Optional[int] = None) -> str:
+    """
+    - max_output_tokens verilmezse env/default kullanır.
+    - tek yerden token kontrolü
+    """
     client = _make_client()
     resp = client.responses.create(
         model=_text_model_name(),
+        max_output_tokens=int(max_output_tokens or _max_output_tokens()),
         input=[
             {"role": "system", "content": [{"type": "input_text", "text": system}]},
             {"role": "user", "content": [{"type": "input_text", "text": user}]},
@@ -349,7 +369,7 @@ def generate_numerology_reading(
         "Dil: Türkçe.\n"
         "Üslup: sıcak, mistik ama boş genelleme yok; somut ve açıklayıcı.\n"
         "Korkutma yok, kesin hüküm yok.\n"
-        "Uzunluk: en az 650-900 kelime bandında.\n"
+        "Derinlik: Orta-üst.\n"
     )
 
     user = f"""
@@ -360,18 +380,23 @@ Kullanıcı bilgileri:
 - Soru: {q}
 
 İstenen içerik:
-1) Kısa özet (3-5 cümle)
-2) Yaşam Yolu sayısını doğum tarihinden hesapla ve kısa adımlarla göster.
-   Master sayılar (11/22/33) gelirse koru.
-3) Konu özel yorum (güçlü yanlar, dikkat edilmesi gerekenler, uygulanabilir öneriler)
-4) 7 günlük mini enerji takvimi (gün gün kısa)
-5) Kapanış: motive edici tek paragraf.
-"""
+1) Kısa özet (6-8 cümle)
+2) Yaşam Yolu sayısını doğum tarihinden hesapla ve adımları göster (11/22/33 korunur)
+3) Karakter çekirdeği (motivasyonlar, değerler, gölge taraf)
+4) İlişki stili (yakınlık/alan ihtiyacı, tetikleyiciler)
+5) Kariyer-para stili (para psikolojisi, risk iştahı, planlama)
+6) 12 somut öneri (kısa ama uygulanabilir)
+7) 14 günlük mini enerji planı (gün gün, tek satır)
+8) Kapanış (tek paragraf)
+
+Uzunluk hedefi: 1200-1800 kelime.
+""".strip()
+
     return call_openai_text(system=system, user=user)
 
 
 # -------------------------
-# ✅ BirthChart (text-only)
+# BirthChart (text-only)
 # -------------------------
 
 def generate_birthchart_reading(
@@ -391,8 +416,8 @@ def generate_birthchart_reading(
         "Dil: Türkçe.\n"
         "Üslup: mistik ama boş genelleme yok; somut ve açıklayıcı.\n"
         "Korkutma yok, kesin hüküm yok.\n"
-        "Uzunluk: en az 700-1000 kelime bandında.\n"
-        "Önemli: Doğum saati yoksa bunu açıkça belirt ve yorumu 'genel' astrolojik temalar üzerinden kur.\n"
+        "Önemli: Doğum saati yoksa bunu açıkça belirt ve yorumu 'genel' temalar üzerinden kur.\n"
+        "Derinlik: Orta-üst.\n"
     )
 
     user = f"""
@@ -405,11 +430,182 @@ Kullanıcı bilgileri:
 - Soru: {q}
 
 İstenen içerik:
-1) Kısa özet (3-5 cümle)
-2) Harita yorumu için gerekli bilgilerin kontrolü (doğum saati yoksa bunun etkisini açıkla)
-3) Kişilik temaları (genel) + güçlü yanlar / gölge yanlar
-4) Konu özel yorum (aşk/para/kariyer vs) + uygulanabilir öneriler
-5) 14 günlük mini enerji takvimi (gün gün kısa)
-6) Kapanış: motive edici tek paragraf
-"""
+1) Kısa özet (6-8 cümle)
+2) Harita veri kontrolü (saat varsa/ yoksa etkisi)
+3) Kişilik temaları (liderlik, duygu düzeni, iletişim, ilişki dili)
+4) Gölge taraf + tetikleyiciler + dengeleme önerileri
+5) Konu özel yorum (topic ağırlıklı)
+6) 12 somut öneri
+7) 14 günlük mini enerji planı (gün gün, tek satır)
+8) Kapanış (tek paragraf)
+
+Uzunluk hedefi: 1400-2000 kelime.
+""".strip()
+
     return call_openai_text(system=system, user=user)
+
+
+# -------------------------
+# Personality Fusion (Numerology + BirthChart -> TEK metin)
+# -------------------------
+
+def generate_personality_fusion_reading(
+    *,
+    name: str,
+    birth_date: str,
+    birth_time: Optional[str],
+    birth_city: str,
+    birth_country: str,
+    topic: str,
+    question: Optional[str],
+    numerology_text: str,
+    birthchart_text: str,
+) -> str:
+    q = (question or "").strip() or "Genel kişilik analizi istiyorum."
+
+    system = (
+        "Sen elit seviyede bir 'BİRLEŞİK KİŞİLİK ANALİSTİ'sin.\n"
+        "Elindeki iki kaynaktan (Numeroloji + Doğum Haritası) bilgileri HARMANLAYIP TEK BİR PROFİL çıkaracaksın.\n\n"
+        "KRİTİK KURAL: İki metni yan yana ekleme / blok blok gitme.\n"
+        "Kural: Aynı şeyi iki kere söyleme.\n"
+        "Kural: 'Numeroloji şöyle, astroloji böyle' diye ayıran dil kullanma.\n"
+        "Kural: Her bölümde iki kaynaktan da izler taşı (karıştır).\n"
+        "Kural: Kesin kehanet yok; olasılık dili; korkutma yok.\n\n"
+        "Biçim: Başlıklar olabilir ama '### Numeroloji' / '### Doğum Haritası' gibi ayıran başlıklar YOK.\n"
+        "Çıktı bölümleri şu sırada olsun:\n"
+        "1) Net özet (8-12 cümle)\n"
+        "2) Entegre çekirdek profil (motivasyonlar, değerler, kimlik dili)\n"
+        "3) Duygusal düzen & stres (tetikleyiciler + regülasyon teknikleri)\n"
+        "4) İlişki dinamikleri (davranış örnekleri + 10 öneri)\n"
+        "5) Kariyer/para tarzı (strateji + risk noktaları + 10 öneri)\n"
+        "6) Gölge çalışma planı (alışkanlıklar, sabote eden kalıplar, 6 haftalık pratik)\n"
+        "7) 14 günlük mini plan (gün gün, tek satır)\n"
+        "8) 90 günlük yol haritası (haftalık başlıklar halinde)\n"
+        "9) Kapanış (1 paragraf, motive edici)\n\n"
+        "Uzunluk: 2600-3600 kelime (PDF’de 7-8 sayfa hedef).\n"
+        "Dil: Türkçe."
+    )
+
+    user = f"""
+Kullanıcı:
+- Ad: {name}
+- Doğum tarihi: {birth_date}
+- Doğum saati: {birth_time or 'bilinmiyor'}
+- Doğum yeri: {birth_city}, {birth_country}
+- Konu: {topic}
+- Soru: {q}
+
+Aşağıda iki ayrı kaynak analiz metni var. Bunları HARMLA ve TEK bir birleşik kişilik analizi yaz:
+
+[NUMEROLOJİ METNİ]
+{numerology_text}
+
+[DOĞUM HARİTASI METNİ]
+{birthchart_text}
+""".strip()
+
+    # fusion çıktısı uzun olduğu için token'i yükselt
+    return call_openai_text(system=system, user=user, max_output_tokens=_max_output_tokens(3000))
+
+
+def generate_personality_reading(
+    *,
+    name: str,
+    birth_date: str,               # YYYY-MM-DD
+    birth_time: Optional[str],     # HH:MM (opsiyonel)
+    birth_city: str,
+    birth_country: str,
+    topic: str,
+    question: Optional[str] = None,
+) -> str:
+    numerology_text = generate_numerology_reading(
+        name=name,
+        birth_date=birth_date,
+        topic=topic,
+        question=question,
+    )
+
+    birthchart_text = generate_birthchart_reading(
+        name=name,
+        birth_date=birth_date,
+        birth_time=birth_time,
+        birth_city=birth_city,
+        birth_country=birth_country,
+        topic=topic,
+        question=question,
+    )
+
+    return generate_personality_fusion_reading(
+        name=name,
+        birth_date=birth_date,
+        birth_time=birth_time,
+        birth_city=birth_city,
+        birth_country=birth_country,
+        topic=topic,
+        question=question,
+        numerology_text=numerology_text,
+        birthchart_text=birthchart_text,
+    )
+
+
+# -------------------------
+# ✅ SYNSTRY (Aşk Uyumu / Sinastri) - yeni feature için
+# -------------------------
+
+def generate_synastry_reading(
+    *,
+    name_a: str,
+    birth_date_a: str,
+    birth_time_a: Optional[str],
+    birth_city_a: str,
+    birth_country_a: str,
+    name_b: str,
+    birth_date_b: str,
+    birth_time_b: Optional[str],
+    birth_city_b: str,
+    birth_country_b: str,
+    topic: str,
+    question: Optional[str] = None,
+) -> str:
+    q = (question or "").strip() or "Genel aşk uyumu analizi istiyorum."
+
+    system = (
+        "Sen elit seviyede bir SİNASTRİ (aşk uyumu) analistisin.\n"
+        "Yaklaşım: numeroloji + doğum haritası temaları.\n"
+        "İki kişiyi ayrı ayrı anlatıp yapıştırma; her bölümde iki kişiyi birlikte ele al.\n"
+        "Kesin kehanet yok; olasılık dili; korkutma yok.\n\n"
+        "ÇIKTI ŞU YAPIYLA:\n"
+        "1) 8-10 cümle özet + ilişkinin ana teması\n"
+        "2) Çekim/uyum profili (iletişim, güven, çatışma) — örnek davranışlarla\n"
+        "3) Duygusal tetikleyiciler + çözüm ritüelleri\n"
+        "4) İletişim dili: büyüten/kıran konuşma örnekleri\n"
+        "5) Romantik kimya + sınırlar\n"
+        "6) Uzun vadeli uyum: para/aile/ortak yaşam\n"
+        "7) Risk haritası: 6-10 risk + her risk için 1 önlem\n"
+        "8) 21 günlük ilişki planı: gün gün kısa\n"
+        "9) Kapanış\n\n"
+        "Doğum saati eksikse bunu belirt, yorumları daha genel kur.\n"
+        "Dil: Türkçe.\n"
+        "Uzunluk hedefi: 2200-3200 kelime."
+    )
+
+    user = f"""
+Konu: {topic}
+Soru: {q}
+
+Partner A:
+- Ad: {name_a}
+- Doğum: {birth_date_a}
+- Saat: {birth_time_a or "bilinmiyor"}
+- Yer: {birth_city_a}, {birth_country_a}
+
+Partner B:
+- Ad: {name_b}
+- Doğum: {birth_date_b}
+- Saat: {birth_time_b or "bilinmiyor"}
+- Yer: {birth_city_b}, {birth_country_b}
+
+İstek: Çok detaylı sinastri üret (PDF’de 6-8 sayfa hedef).
+""".strip()
+
+    return call_openai_text(system=system, user=user, max_output_tokens=_max_output_tokens(3200))
