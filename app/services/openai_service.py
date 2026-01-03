@@ -78,7 +78,6 @@ def _parse_json_object(text: str) -> Optional[dict]:
         return None
     t = text.strip()
 
-    # direkt dene
     try:
         obj = json.loads(t)
         if isinstance(obj, dict):
@@ -86,7 +85,6 @@ def _parse_json_object(text: str) -> Optional[dict]:
     except Exception:
         pass
 
-    # aradan { } çek
     start = t.find("{")
     end = t.rfind("}")
     if start != -1 and end != -1 and end > start:
@@ -102,7 +100,7 @@ def _parse_json_object(text: str) -> Optional[dict]:
 
 
 # -------------------------
-# ✅ Text-only OpenAI call (NUMEROLOGY / TAROT)
+# ✅ Text-only OpenAI call (TAROT / NUMEROLOGY / BIRTHCHART)
 # -------------------------
 
 def call_openai_text(*, system: str, user: str) -> str:
@@ -120,13 +118,8 @@ def call_openai_text(*, system: str, user: str) -> str:
     return out
 
 
-# ✅ GERİ UYUMLULUK: bazı dosyalar eski isimle çağırıyor olabilir
-def _call_openai_text(*, system: str, user: str) -> str:
-    return call_openai_text(system=system, user=user)
-
-
 # -------------------------
-# Coffee
+# Coffee (vision)
 # -------------------------
 
 def validate_coffee_images(image_paths: List[str]) -> Dict[str, Any]:
@@ -218,7 +211,7 @@ def generate_fortune(
 
 
 # -------------------------
-# Hand
+# Hand (vision)
 # -------------------------
 
 def validate_hand_images(image_paths: List[str]) -> Dict[str, Any]:
@@ -339,7 +332,7 @@ def generate_tarot_reading(
 
 
 # -------------------------
-# ✅ Numerology (text-only)
+# Numerology (text-only)
 # -------------------------
 
 def generate_numerology_reading(
@@ -374,5 +367,49 @@ Kullanıcı bilgileri:
 4) 7 günlük mini enerji takvimi (gün gün kısa)
 5) Kapanış: motive edici tek paragraf.
 """
-    # burada call_openai_text kullanıyoruz; ama eski yerler _call_openai_text çağırsa da wrapper var
+    return call_openai_text(system=system, user=user)
+
+
+# -------------------------
+# ✅ BirthChart (text-only)
+# -------------------------
+
+def generate_birthchart_reading(
+    *,
+    name: str,
+    birth_date: str,               # YYYY-MM-DD
+    birth_time: Optional[str],     # HH:MM (opsiyonel)
+    birth_city: str,
+    birth_country: str,
+    topic: str,
+    question: Optional[str] = None,
+) -> str:
+    q = (question or "").strip() or "Genel doğum haritası yorumu istiyorum."
+
+    system = (
+        "Sen profesyonel bir astrologsun.\n"
+        "Dil: Türkçe.\n"
+        "Üslup: mistik ama boş genelleme yok; somut ve açıklayıcı.\n"
+        "Korkutma yok, kesin hüküm yok.\n"
+        "Uzunluk: en az 700-1000 kelime bandında.\n"
+        "Önemli: Doğum saati yoksa bunu açıkça belirt ve yorumu 'genel' astrolojik temalar üzerinden kur.\n"
+    )
+
+    user = f"""
+Kullanıcı bilgileri:
+- Ad: {name}
+- Doğum tarihi: {birth_date}
+- Doğum saati: {birth_time or 'bilinmiyor'}
+- Doğum yeri: {birth_city}, {birth_country}
+- Konu: {topic}
+- Soru: {q}
+
+İstenen içerik:
+1) Kısa özet (3-5 cümle)
+2) Harita yorumu için gerekli bilgilerin kontrolü (doğum saati yoksa bunun etkisini açıkla)
+3) Kişilik temaları (genel) + güçlü yanlar / gölge yanlar
+4) Konu özel yorum (aşk/para/kariyer vs) + uygulanabilir öneriler
+5) 14 günlük mini enerji takvimi (gün gün kısa)
+6) Kapanış: motive edici tek paragraf
+"""
     return call_openai_text(system=system, user=user)

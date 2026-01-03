@@ -9,6 +9,9 @@ import '../hand/hand_screen.dart';
 import '../tarot/tarot_intro_screen.dart';
 import '../numerology/numerology_intro_screen.dart';
 
+// ✅ NEW: Doğum Haritası
+import '../birthchart/birthchart_intro_screen.dart';
+
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
@@ -37,6 +40,14 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
+  // ✅ NEW
+  void _openBirthChart(BuildContext context) {
+    debugPrint("[NAV] BirthChart tapped");
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const BirthChartIntroScreen()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return MysticScaffold(
@@ -55,12 +66,16 @@ class HomeScreen extends StatelessWidget {
                       fontSize: 34,
                       fontWeight: FontWeight.w900,
                       letterSpacing: 1.2,
+                      color: Colors.white,
                     ),
                   ),
                   SizedBox(height: 6),
                   Text(
                     'Kaderin, senin için hazır.',
-                    style: TextStyle(fontSize: 14, color: AppColors.textSecondary),
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: AppColors.textSecondary,
+                    ),
                   ),
                 ],
               ),
@@ -96,19 +111,27 @@ class HomeScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
 
-                    // ✅ Numeroloji tıklanabilir
                     FeatureCard(
                       title: 'Numeroloji',
                       subtitle: 'Yaşam sayısı, kader sayısı ve daha fazlası.',
                       icon: Icons.auto_awesome_outlined,
                       onTap: () => _openNumerology(context),
                     ),
+                    const SizedBox(height: 12),
+
+                    // ✅ NEW: Doğum Haritası
+                    FeatureCard(
+                      title: 'Doğum Haritası',
+                      subtitle: 'Doğum tarihi, yer ve (opsiyonel) saat ile analiz.',
+                      icon: Icons.public_outlined,
+                      onTap: () => _openBirthChart(context),
+                    ),
                   ],
                 ),
               ),
             ),
 
-            // ✅ Bottom bar (ListView’in dışına alındı)
+            // ✅ Bottom bar
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
               decoration: BoxDecoration(
