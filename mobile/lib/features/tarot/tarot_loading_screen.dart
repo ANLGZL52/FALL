@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../services/tarot_api.dart';
 import '../../widgets/mystic_scaffold.dart';
 import 'tarot_models.dart';
 import 'tarot_select_screen.dart';
@@ -22,17 +23,48 @@ class _TarotLoadingScreenState extends State<TarotLoadingScreen> {
   @override
   void initState() {
     super.initState();
-    Future.delayed(const Duration(milliseconds: 650), () {
+    _startAndGo();
+  }
+
+  String _spreadToApi(TarotSpreadType t) {
+    switch (t) {
+      case TarotSpreadType.three:
+        return "three";
+      case TarotSpreadType.six:
+        return "six";
+      case TarotSpreadType.twelve:
+        return "twelve";
+    }
+  }
+
+  Future<void> _startAndGo() async {
+    try {
+      final startRes = await TarotApi.start(
+        topic: "Tarot",
+        question: widget.question,
+        name: "Misafir",
+        age: null,
+        spreadType: _spreadToApi(widget.spreadType),
+      );
+
+      final readingId = (startRes["id"] ?? "").toString();
+      if (readingId.isEmpty) throw Exception("readingId boş döndü");
+
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
           builder: (_) => TarotSelectScreen(
+            readingId: readingId,
             question: widget.question,
             spreadType: widget.spreadType,
           ),
         ),
       );
-    });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+      Navigator.of(context).pop();
+    }
   }
 
   @override

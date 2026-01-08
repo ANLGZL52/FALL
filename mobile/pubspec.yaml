@@ -15,18 +15,21 @@ dependencies:
   http: ^1.2.2
   image_picker: ^1.1.2
 
-  # ✅ PDF download/save/open
+  # PDF download / save / open
   path_provider: ^2.1.4
   open_filex: ^4.5.0
 
-  # ✅ PDF linkini tarayıcıda açmak için (SynastryResultScreen bunu kullanıyor)
+  # PDF linkini tarayıcıda açmak için
   url_launcher: ^6.3.0
 
   flutter_localizations:
     sdk: flutter
 
-  # ✅ Flutter SDK bunu 0.20.2'ye pinliyor
+  # Flutter SDK tarafından pinlenmiş
   intl: ^0.20.2
+
+  # ✅ Telefon simülasyonu (debug only)
+  device_preview: ^1.2.0
 
 dev_dependencies:
   flutter_test:
@@ -36,5 +39,5 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/backgrounds/ChatGPT Image 24 Ara 2025 21_38_14.png
+    - assets/backgrounds/ChatGPT Image 3 Oca 2026 18_20_30.png
     - assets/tarot/cards/

@@ -53,18 +53,18 @@ class PersonalityReading {
 }
 
 class PersonalityApi {
-  /// Windows Desktop: 127.0.0.1 çalışır.
-  /// Android Emulator: 10.0.2.2 kullanmalısın.
-  /// Gerçek telefon: PC'nin LAN IP'si (örn 192.168.1.xx)
+  /// Windows Desktop: 127.0.0.1 çalışır
+  /// Android Emulator: 10.0.2.2
+  /// Gerçek telefon: PC LAN IP (örn 192.168.1.xx)
   static const String baseUrl = "http://127.0.0.1:8001/api/v1";
 
   static Future<PersonalityReading> start({
     required String name,
     required String birthDate, // YYYY-MM-DD
-    String? birthTime, // HH:MM (ops)
+    String? birthTime, // HH:MM (opsiyonel)
     required String birthCity,
-    required String birthCountry,
-    required String topic,
+    String birthCountry = "TR",
+    String topic = "genel",
     String? question,
   }) async {
     final uri = Uri.parse("$baseUrl/personality/start");
@@ -88,6 +88,7 @@ class PersonalityApi {
     return PersonalityReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
+  /// Ödeme UI yok; backend auto-paid yapsa bile bazı kurulumlarda hâlâ kullanılabilir.
   static Future<PersonalityReading> markPaid({
     required String readingId,
     String? paymentRef,

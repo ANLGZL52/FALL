@@ -1,13 +1,14 @@
+// mobile/lib/features/birthchart/birthchart_intro_screen.dart
 import 'package:flutter/material.dart';
 import '../../widgets/mystic_scaffold.dart';
-import 'birthchart_info_screen.dart';
+import 'birthchart_form_screen.dart';
 
 class BirthChartIntroScreen extends StatelessWidget {
   const BirthChartIntroScreen({super.key});
 
-  void _goInfo(BuildContext context) {
+  void _goForm(BuildContext context) {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const BirthChartInfoScreen()),
+      MaterialPageRoute(builder: (_) => const BirthChartFormScreen()),
     );
   }
 
@@ -43,32 +44,20 @@ class BirthChartIntroScreen extends StatelessWidget {
                   borderRadius: BorderRadius.circular(18),
                   border: Border.all(color: Colors.white12),
                 ),
-                child: Column(
+                child: const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      "Doğum Haritası ile kişilik temaların,\nilişki dinamiklerin ve dönem enerjilerin yorumlanır.",
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        height: 1.25,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
                     Text(
-                      "3 adım:\n1) Bilgileri gir\n2) Ödeme\n3) AI yorumu",
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.85),
-                        fontSize: 14,
-                        height: 1.35,
-                        fontWeight: FontWeight.w800,
-                      ),
+                      "Doğum haritası, doğduğun anın gökyüzü koordinatlarıyla oluşturulan kişisel bir pusuladır.\n\n"
+                      "Karakter çekirdeğini, ilişki tarzını, stres-tetikleyicilerini ve önümüzdeki dönem temalarını "
+                      "daha net görmene yardımcı olur. Saat bilgisi varsa yorum daha keskinleşir; yoksa genel tema üzerinden ilerler.",
+                      style: TextStyle(color: Colors.white, fontSize: 15.5, height: 1.3, fontWeight: FontWeight.w800),
                     ),
-                    const SizedBox(height: 8),
+                    SizedBox(height: 12),
                     Text(
-                      "Not: Doğum saati yoksa da devam edebilirsin; yorum daha genel olur.",
-                      style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 12, height: 1.35),
+                      "Analiz; verdiğin bilgilere göre kişiselleştirilir ve pratik önerilerle desteklenir. "
+                      "Amacımız: ‘ne oluyor?’u anlatmak değil, ‘ne yapmalısın?’ı netleştirmek.",
+                      style: TextStyle(color: Colors.white70, fontSize: 13.5, height: 1.35, fontWeight: FontWeight.w600),
                     ),
                   ],
                 ),
@@ -86,7 +75,7 @@ class BirthChartIntroScreen extends StatelessWidget {
                     foregroundColor: Colors.black,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   ),
-                  onPressed: () => _goInfo(context),
+                  onPressed: () => _goForm(context),
                   child: const Text("Başla", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
                 ),
               ),

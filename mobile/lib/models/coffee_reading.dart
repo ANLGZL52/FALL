@@ -30,11 +30,13 @@ class CoffeeReading {
   });
 
   factory CoffeeReading.fromJson(Map<String, dynamic> j) {
-    final photos = (j['photos'] as List?)?.map((e) => e.toString()).toList() ?? <String>[];
+    final photos =
+        (j['photos'] as List?)?.map((e) => e.toString()).toList() ?? <String>[];
 
     // ✅ backend comment veya result_text dönebilir
     final rawComment = (j['comment'] ?? j['result_text'])?.toString();
-    final comment = (rawComment != null && rawComment.trim().isNotEmpty) ? rawComment : null;
+    final comment =
+        (rawComment != null && rawComment.trim().isNotEmpty) ? rawComment : null;
 
     return CoffeeReading(
       id: j['id'].toString(),

@@ -1,113 +1,123 @@
 import 'package:flutter/material.dart';
 
-import '../../models/coffee_reading.dart';
-import '../../services/coffee_api.dart';
+import '../../widgets/mystic_scaffold.dart';
 import '../../widgets/glass_card.dart';
 import '../../widgets/gradient_button.dart';
-import '../../widgets/mystic_scaffold.dart';
 
-class CoffeeResultScreen extends StatefulWidget {
-  final CoffeeReading reading;
-  const CoffeeResultScreen({super.key, required this.reading});
+import '../home/home_screen.dart';
 
-  @override
-  State<CoffeeResultScreen> createState() => _CoffeeResultScreenState();
-}
+class CoffeeResultScreen extends StatelessWidget {
+  final String resultText;
 
-class _CoffeeResultScreenState extends State<CoffeeResultScreen> {
-  bool _sending = false;
+  const CoffeeResultScreen({
+    super.key,
+    required this.resultText,
+  });
 
-  Future<void> _send(bool liked) async {
-    setState(() => _sending = true);
-    try {
-      final rating = liked ? 5 : 2;
-      await CoffeeApi.rate(readingId: widget.reading.id, rating: rating);
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(liked ? 'Memnun olmana sevindim ✨' : 'Not ettim. Bir dahaki daha iyi olacak.')),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Geri bildirim hatası: $e')));
-    } finally {
-      if (mounted) setState(() => _sending = false);
-    }
+  void _goHome(BuildContext context) {
+    // ✅ Stack'i temizle: kullanıcı hiçbir şekilde önceki adımlara dönemez
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const HomeScreen()),
+      (route) => false,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final status = widget.reading.status;
-    final isRejected = status == 'rejected';
+    return PopScope(
+      // ✅ Android back / iOS back swipe dahil: geri dönüşü kapatır
+      canPop: false,
+      onPopInvoked: (didPop) {
+        _goHome(context);
+      },
+      child: MysticScaffold(
+        scrimOpacity: 0.84,
+        patternOpacity: 0.16,
+        appBar: AppBar(
+          title: const Text('Fal Sonucu'),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
 
-    final title = isRejected ? 'Foto Uygun Değil' : 'Fal Sonucu';
-    final comment = widget.reading.comment ?? 'Yorum bulunamadı.';
-
-    return MysticScaffold(
-      scrimOpacity: 0.86,
-      patternOpacity: 0.12,
-      appBar: AppBar(title: Text(title)),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: isRejected ? _buildRejected(comment) : _buildReady(comment),
-      ),
-    );
-  }
-
-  Widget _buildRejected(String comment) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        GlassCard(child: Text(comment, style: const TextStyle(height: 1.5))),
-        const SizedBox(height: 12),
-        Text(
-          'Lütfen sadece kahve falına ait fotoğraflar yükle:\n'
-          '• fincan içi (telve görünsün)\n'
-          '• tabak (akmış telve)\n'
-          '• üstten yakın plan\n'
-          '3–5 foto olmalı.',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: Colors.white.withOpacity(0.80)),
+          // ✅ Sol üst geri butonunu kaldırıyoruz (çünkü geri dönmek istemiyoruz)
+          automaticallyImplyLeading: false,
+          actions: [
+            IconButton(
+              tooltip: 'Ana Sayfa',
+              onPressed: () => _goHome(context),
+              icon: const Icon(Icons.home_rounded),
+            ),
+          ],
         ),
-        const Spacer(),
-        GradientButton(
-          text: 'Yeni Foto ile Tekrar Dene',
-          onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
-        ),
-      ],
-    );
-  }
 
-  Widget _buildReady(String comment) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(
-          child: GlassCard(
-            child: SingleChildScrollView(
-              child: Text(comment, style: const TextStyle(height: 1.5)),
+        // ✅ Çakışmayı bitiren ana çözüm: SafeArea + doğru padding + scroll
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Column(
+              children: [
+                // ✅ Sonuç metni scroll’lu alan
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: GlassCard(
+                      child: Text(
+                        resultText,
+                        style: const TextStyle(height: 1.45, fontSize: 14.5),
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                // ✅ Alt aksiyon alanı sabit kalsın, metnin üstüne binmesin
+                GlassCard(
+                  child: Column(
+                    children: [
+                      const Text(
+                        'Bu faldan memnun kaldın mı?',
+                        style: TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      const SizedBox(height: 10),
+
+                      Row(
+                        children: [
+                          Expanded(
+                            child: GradientButton(
+                              text: 'Evet',
+                              onPressed: () {
+                                // TODO: Feedback endpoint varsa gönder
+                                _goHome(context);
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () {
+                                // TODO: Feedback endpoint varsa gönder
+                                _goHome(context);
+                              },
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                side: BorderSide(color: Colors.white.withOpacity(0.35)),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              child: const Text('Hayır'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
         ),
-        const SizedBox(height: 14),
-        const Text('Bu faldan memnun kaldın mı?', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w800)),
-        const SizedBox(height: 10),
-        if (_sending)
-          const Center(child: CircularProgressIndicator())
-        else
-          Row(
-            children: [
-              Expanded(child: GradientButton(text: 'Evet', onPressed: () => _send(true))),
-              const SizedBox(width: 12),
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => _send(false),
-                  child: const Text('Hayır'),
-                ),
-              ),
-            ],
-          ),
-      ],
+      ),
     );
   }
 }

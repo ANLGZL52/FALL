@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:fall_app/widgets/mystic_scaffold.dart';
 import 'package:fall_app/services/personality_api.dart';
-import 'personality_result_screen.dart';
+import 'personality_generating_screen.dart';
 
 class PersonalityPaymentScreen extends StatefulWidget {
   final String readingId;
@@ -10,7 +10,6 @@ class PersonalityPaymentScreen extends StatefulWidget {
   final String birthTime;
   final String birthCity;
   final String birthCountry;
-  final String topic;
   final String question;
 
   const PersonalityPaymentScreen({
@@ -21,7 +20,6 @@ class PersonalityPaymentScreen extends StatefulWidget {
     required this.birthTime,
     required this.birthCity,
     required this.birthCountry,
-    required this.topic,
     required this.question,
   });
 
@@ -32,29 +30,30 @@ class PersonalityPaymentScreen extends StatefulWidget {
 class _PersonalityPaymentScreenState extends State<PersonalityPaymentScreen> {
   bool _loading = false;
 
-  Future<void> _payAndGenerate() async {
+  Future<void> _confirmAndContinue() async {
     setState(() => _loading = true);
     try {
+      // UI’da MOCK yazmıyoruz ama backend akışı bozulmasın diye işaretliyoruz.
       await PersonalityApi.markPaid(
         readingId: widget.readingId,
-        paymentRef: "mock_${DateTime.now().millisecondsSinceEpoch}",
+        paymentRef: "ref_${DateTime.now().millisecondsSinceEpoch}",
       );
 
-      final generated = await PersonalityApi.generate(readingId: widget.readingId);
-
       if (!mounted) return;
+
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => PersonalityResultScreen(
-            readingId: generated.id,
-            title: "Kişilik Analizi – AI",
-            resultText: generated.resultText ?? "",
+          builder: (_) => PersonalityGeneratingScreen(
+            readingId: widget.readingId,
+            name: widget.name,
           ),
         ),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Hata: $e")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Hata: $e"), behavior: SnackBarBehavior.floating),
+      );
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -77,14 +76,15 @@ class _PersonalityPaymentScreenState extends State<PersonalityPaymentScreen> {
                 ),
                 const Expanded(
                   child: Text(
-                    "Kişilik Analizi – Ödeme",
-                    style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800),
+                    "Kişilik Analizi – Onay",
+                    style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 10),
+
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 18),
               child: Container(
@@ -98,30 +98,23 @@ class _PersonalityPaymentScreenState extends State<PersonalityPaymentScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      "Ödeme",
-                      style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900),
+                      "Bilgilerini kontrol et",
+                      style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w900),
                     ),
                     const SizedBox(height: 10),
-                    Text("Ad: ${widget.name}", style: const TextStyle(color: Colors.white)),
-                    Text("Doğum: ${widget.birthDate}", style: const TextStyle(color: Colors.white)),
-                    Text("Saat: ${widget.birthTime.isEmpty ? "—" : widget.birthTime}",
-                        style: const TextStyle(color: Colors.white)),
-                    Text("Yer: ${widget.birthCity}, ${widget.birthCountry}", style: const TextStyle(color: Colors.white)),
-                    Text("Konu: ${widget.topic}", style: const TextStyle(color: Colors.white)),
-                    Text(
-                      "Soru: ${widget.question.isEmpty ? "—" : widget.question}",
-                      style: const TextStyle(color: Colors.white),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      "Şimdilik ödeme entegrasyonu yok.\nButona basınca ödeme yapılmış sayıp AI analizi üretilecek.",
-                      style: TextStyle(color: Colors.white.withOpacity(0.75)),
-                    ),
+                    _row("Ad", widget.name),
+                    _row("Doğum", widget.birthDate),
+                    _row("Saat", widget.birthTime.isEmpty ? "—" : widget.birthTime),
+                    _row("Yer", "${widget.birthCity}, ${widget.birthCountry}"),
+                    _row("Not", widget.question.isEmpty ? "—" : widget.question),
+                    const SizedBox(height: 6),
                   ],
                 ),
               ),
             ),
+
             const Spacer(),
+
             Padding(
               padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
               child: SizedBox(
@@ -133,15 +126,37 @@ class _PersonalityPaymentScreenState extends State<PersonalityPaymentScreen> {
                     foregroundColor: Colors.black,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   ),
-                  onPressed: _loading ? null : _payAndGenerate,
+                  onPressed: _loading ? null : _confirmAndContinue,
                   child: _loading
                       ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text("Öde → AI Analizi", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
+                      : const Text("Devam", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
                 ),
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _row(String k, String v) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 72,
+            child: Text(k, style: TextStyle(color: Colors.white.withOpacity(0.70), fontSize: 12)),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              v,
+              style: const TextStyle(color: Colors.white, height: 1.25),
+            ),
+          ),
+        ],
       ),
     );
   }

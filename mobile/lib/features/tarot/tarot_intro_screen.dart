@@ -46,11 +46,11 @@ class _TarotIntroScreenState extends State<TarotIntroScreen> {
             const GlassCard(
               child: Text(
                 'Tarot Açılımı\n\n'
-                '1) Sorunu yaz\n'
-                '2) Açılım türünü seç (3/6/12)\n'
-                '3) Kartları kapalı görürsün → tıkla flip ile açılır\n'
-                '4) Açılan kartlara tekrar tıkla → seç\n\n'
-                'Şu an içerik + animasyon tamam. OpenAI yorum sonraki adım.',
+                '• Niyetini / sorunu net bir cümleyle yaz.\n'
+                '• Açılım türünü seç (3 / 6 / 12 kart).\n'
+                '• Kartlar kapalı gelir; dokunarak kartları açarsın.\n'
+                '• Açılan kartlar arasından, açılımın istediği sayıda kartı seçersin.\n\n'
+                'Not: Ne kadar net bir soru, o kadar isabetli bir yorum.',
                 style: TextStyle(height: 1.35),
               ),
             ),
@@ -59,18 +59,27 @@ class _TarotIntroScreenState extends State<TarotIntroScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Sorun', style: TextStyle(color: Colors.white.withOpacity(0.9), fontWeight: FontWeight.w900)),
+                  Text(
+                    'Sorun',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.9),
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
                   const SizedBox(height: 10),
                   TextField(
                     controller: _controller,
                     maxLines: 2,
                     style: const TextStyle(color: Colors.white),
                     decoration: InputDecoration(
-                      hintText: 'Örn: AŞK / Kariyer / Para / Karar...',
+                      hintText: 'Örn: İlişkim nereye gidiyor? / Kariyerde karar aşaması / Maddi plan…',
                       hintStyle: TextStyle(color: Colors.white.withOpacity(0.45)),
                       filled: true,
                       fillColor: Colors.black.withOpacity(0.25),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide.none,
+                      ),
                     ),
                   ),
                 ],

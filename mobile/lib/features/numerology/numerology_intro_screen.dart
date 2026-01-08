@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 
 import 'package:fall_app/widgets/mystic_scaffold.dart';
-import 'package:fall_app/features/numerology/numerology_info_screen.dart';
+import 'package:fall_app/features/numerology/numerology_form_screen.dart';
 
 class NumerologyIntroScreen extends StatelessWidget {
   const NumerologyIntroScreen({super.key});
 
-  void _goInfo(BuildContext context) {
+  void _goForm(BuildContext context) {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const NumerologyInfoScreen()),
+      MaterialPageRoute(builder: (_) => const NumerologyFormScreen()),
     );
   }
 
@@ -54,22 +54,26 @@ class NumerologyIntroScreen extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      "Numeroloji ile yaşam sayın, kader temaların\nve dönem enerjilerin analiz edilir.",
+                      "Numeroloji; doğum tarihin ve isminin sayı dilini kullanarak\n"
+                      "karakter çekirdeğini, tekrar eden yaşam temalarını ve dönemsel\n"
+                      "enerjilerini yorumlayan kadim bir analiz yöntemidir.",
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: 16,
-                        height: 1.25,
-                        fontWeight: FontWeight.w700,
+                        fontSize: 15.5,
+                        height: 1.35,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      "3 adım:\n1) Bilgileri gir\n2) Ödeme\n3) AI yorumu",
+                      "Kısa bir bilgi girişiyle; ilişki, kariyer, para ve karar süreçlerinde "
+                      "sana en çok çalışan kalıpları görürsün. Çıktı; genel geçer cümleler değil, "
+                      "uygulanabilir önerilerle dolu detaylı bir analizdir.",
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.85),
-                        fontSize: 14,
+                        fontSize: 13.5,
                         height: 1.35,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
@@ -92,7 +96,7 @@ class NumerologyIntroScreen extends StatelessWidget {
                       borderRadius: BorderRadius.circular(16),
                     ),
                   ),
-                  onPressed: () => _goInfo(context),
+                  onPressed: () => _goForm(context),
                   child: const Text(
                     "Başla",
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),

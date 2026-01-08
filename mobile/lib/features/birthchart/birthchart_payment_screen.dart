@@ -1,8 +1,9 @@
+// mobile/lib/features/birthchart/birthchart_payment_screen.dart
 import 'package:flutter/material.dart';
-
 import '../../widgets/mystic_scaffold.dart';
 import '../../services/birthchart_api.dart';
 import '../../models/birthchart_reading.dart';
+import 'birthchart_loading_screen.dart';
 import 'birthchart_result_screen.dart';
 
 class BirthChartPaymentScreen extends StatefulWidget {
@@ -20,22 +21,34 @@ class _BirthChartPaymentScreenState extends State<BirthChartPaymentScreen> {
     if (_loading) return;
     setState(() => _loading = true);
 
+    // ✅ önce loading ekranına geç
+    if (mounted) {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const BirthChartLoadingScreen()),
+      );
+    }
+
     try {
-      // 1) mock ödeme: paid işaretle
       await BirthChartApi.markPaid(
         readingId: widget.reading.id,
         paymentRef: "mock_${DateTime.now().millisecondsSinceEpoch}",
       );
 
-      // 2) AI üret
       final generated = await BirthChartApi.generate(readingId: widget.reading.id);
 
       if (!mounted) return;
-      Navigator.of(context).pushReplacement(
+
+      // ✅ loading dahil hepsini replace et → result
+      Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => BirthChartResultScreen(reading: generated)),
+        (route) => false,
       );
     } catch (e) {
       if (!mounted) return;
+
+      // loading'i kapat
+      Navigator.of(context).popUntil((r) => r.isFirst);
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Hata: $e")),
       );
@@ -62,7 +75,7 @@ class _BirthChartPaymentScreenState extends State<BirthChartPaymentScreen> {
                   icon: const Icon(Icons.arrow_back, color: Colors.white),
                 ),
                 const Text(
-                  "Doğum Haritası – Ödeme",
+                  "Doğum Haritası – Özet",
                   style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800),
                 ),
               ],
@@ -81,7 +94,7 @@ class _BirthChartPaymentScreenState extends State<BirthChartPaymentScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text("Özet", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900)),
+                    const Text("Bilgiler", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900)),
                     const SizedBox(height: 10),
                     Text("Ad: ${r.name}", style: const TextStyle(color: Colors.white)),
                     Text("Doğum: ${r.birthDate}", style: const TextStyle(color: Colors.white)),
@@ -89,11 +102,6 @@ class _BirthChartPaymentScreenState extends State<BirthChartPaymentScreen> {
                     Text("Yer: ${r.birthCity}, ${r.birthCountry}", style: const TextStyle(color: Colors.white)),
                     Text("Konu: ${r.topic}", style: const TextStyle(color: Colors.white)),
                     Text("Soru: ${r.question ?? "—"}", style: const TextStyle(color: Colors.white)),
-                    const SizedBox(height: 10),
-                    Text(
-                      "Şimdilik ödeme entegrasyonu yok.\nButona basınca ödeme yapılmış sayıp AI yorumu üretiyoruz.",
-                      style: TextStyle(color: Colors.white.withOpacity(0.75)),
-                    ),
                   ],
                 ),
               ),
@@ -115,7 +123,7 @@ class _BirthChartPaymentScreenState extends State<BirthChartPaymentScreen> {
                   onPressed: _loading ? null : _payAndGenerate,
                   child: _loading
                       ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text("Öde → Yorumu AI", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
+                      : const Text("Öde → Yorumu Üret", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
                 ),
               ),
             ),

@@ -5,6 +5,7 @@ import '../../widgets/glass_card.dart';
 import '../../widgets/gradient_button.dart';
 import '../../services/tarot_api.dart';
 import 'tarot_payment_screen.dart';
+import 'tarot_models.dart';
 
 class TarotDeckScreen extends StatefulWidget {
   final String readingId;
@@ -25,7 +26,6 @@ class TarotDeckScreen extends StatefulWidget {
 class _TarotDeckScreenState extends State<TarotDeckScreen> {
   bool _loading = false;
 
-  // Basit bir “deck id listesi” (ileride 78 kart full listeye dönecek)
   final List<String> _deck = const [
     "the_fool", "the_magician", "the_high_priestess", "the_empress", "the_emperor",
     "the_hierophant", "the_lovers", "the_chariot", "strength", "the_hermit",
@@ -43,8 +43,18 @@ class _TarotDeckScreenState extends State<TarotDeckScreen> {
       await TarotApi.selectCards(readingId: widget.readingId, cards: cards);
 
       if (!mounted) return;
+
+      // ⚠️ Legacy ekran: question/spreadType/selectedCards yoktu.
+      // Kırılmasın diye minimal dolduruyoruz.
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => TarotPaymentScreen(readingId: widget.readingId)),
+        MaterialPageRoute(
+          builder: (_) => TarotPaymentScreen(
+            readingId: widget.readingId,
+            question: "Tarot",
+            spreadType: TarotSpreadType.three,
+            selectedCards: const [],
+          ),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
@@ -77,8 +87,7 @@ class _TarotDeckScreenState extends State<TarotDeckScreen> {
           children: [
             GlassCard(
               child: Text(
-                'Açılım: ${widget.cardsWanted} kart\n'
-                'Desteden ${widget.cardsWanted} kart seç.',
+                '${widget.cardsWanted} kart seç.',
                 style: const TextStyle(fontWeight: FontWeight.w800),
               ),
             ),
@@ -110,7 +119,7 @@ class _TarotDeckScreenState extends State<TarotDeckScreen> {
                         children: [
                           Center(
                             child: Icon(
-                              Icons.style, // kart ikonu
+                              Icons.style,
                               size: 46,
                               color: Colors.white.withOpacity(0.85),
                             ),
@@ -130,7 +139,7 @@ class _TarotDeckScreenState extends State<TarotDeckScreen> {
             ),
             const SizedBox(height: 12),
             GradientButton(
-              text: _loading ? 'Kaydediliyor...' : 'Devam → Ödeme',
+              text: _loading ? 'Kaydediliyor...' : 'Devam',
               onPressed: (!canContinue || _loading) ? null : _saveAndContinue,
             ),
           ],

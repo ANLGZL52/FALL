@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import '../../models/hand_reading.dart';
 import '../../services/hand_api.dart';
 import '../../widgets/glass_card.dart';
+import '../../widgets/gradient_button.dart';
 import '../../widgets/mystic_scaffold.dart';
+import '../home/home_screen.dart';
 
 class HandResultScreen extends StatefulWidget {
   final String readingId;
@@ -18,6 +20,13 @@ class _HandResultScreenState extends State<HandResultScreen> {
   HandReading? _reading;
 
   int? _selectedRating;
+
+  void _goHome() {
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const HomeScreen()),
+      (route) => false,
+    );
+  }
 
   @override
   void initState() {
@@ -48,8 +57,15 @@ class _HandResultScreenState extends State<HandResultScreen> {
         _reading = r;
         _selectedRating = rating;
       });
+
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Puanın alındı ✨')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Puanın alındı ✨')),
+      );
+
+      // ✅ kullanıcı sonuçtan sonra geri dönmesin -> ana sayfaya yönlendir
+      await Future.delayed(const Duration(milliseconds: 650));
+      if (mounted) _goHome();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
@@ -73,61 +89,98 @@ class _HandResultScreenState extends State<HandResultScreen> {
   Widget build(BuildContext context) {
     final r = _reading;
 
-    return MysticScaffold(
-      scrimOpacity: 0.82,
-      patternOpacity: 0.18,
-      appBar: AppBar(
-        title: const Text('El Falın'),
-        actions: [
-          IconButton(
-            onPressed: _loading ? null : _load,
-            icon: const Icon(Icons.refresh),
-          )
-        ],
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : (r == null)
-                ? const Center(child: Text('Veri bulunamadı.'))
-                : ListView(
-                    children: [
-                      GlassCard(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '${r.name} ✨',
-                              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+    final String result = (r?.resultText ?? r?.comment ?? '').trim();
+
+    return PopScope(
+      canPop: false, // ✅ geri dönüş kapalı
+      onPopInvoked: (_) => _goHome(),
+      child: MysticScaffold(
+        scrimOpacity: 0.82,
+        patternOpacity: 0.18,
+        appBar: AppBar(
+          title: const Text('El Falın'),
+          automaticallyImplyLeading: false, // ✅ back icon yok
+          actions: [
+            IconButton(
+              tooltip: 'Yenile',
+              onPressed: _loading ? null : _load,
+              icon: const Icon(Icons.refresh),
+            ),
+            IconButton(
+              tooltip: 'Ana Sayfa',
+              onPressed: _goHome,
+              icon: const Icon(Icons.home_rounded),
+            ),
+          ],
+        ),
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : (r == null)
+                    ? Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Text('Veri bulunamadı.'),
+                          const SizedBox(height: 12),
+                          GradientButton(text: 'Ana Sayfaya Dön', onPressed: _goHome),
+                        ],
+                      )
+                    : Column(
+                        children: [
+                          Expanded(
+                            child: ListView(
+                              children: [
+                                GlassCard(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        '${r.name} ✨',
+                                        style: const TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.w900,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text('Konu: ${r.topic}'),
+                                      const SizedBox(height: 8),
+                                      const Divider(),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        result.isEmpty ? 'Yorum bulunamadı.' : result,
+                                        style: const TextStyle(height: 1.42),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 14),
+                                GlassCard(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'Değerlendir',
+                                        style: TextStyle(fontWeight: FontWeight.w800),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      _ratingRow(),
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
-                            const SizedBox(height: 6),
-                            Text('Konu: ${r.topic}'),
-                            const SizedBox(height: 8),
-                            const Divider(),
-                            const SizedBox(height: 8),
-                            Text(
-                              (r.resultText ?? r.comment ?? '').trim().isEmpty
-                                  ? 'Yorum bulunamadı.'
-                                  : (r.resultText ?? r.comment!).trim(),
-                              style: const TextStyle(height: 1.35),
-                            ),
-                          ],
-                        ),
+                          ),
+                          const SizedBox(height: 12),
+                          GradientButton(
+                            text: 'Ana Sayfaya Dön',
+                            onPressed: _goHome,
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 14),
-                      GlassCard(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('Değerlendir', style: TextStyle(fontWeight: FontWeight.w800)),
-                            const SizedBox(height: 8),
-                            _ratingRow(),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
+          ),
+        ),
       ),
     );
   }

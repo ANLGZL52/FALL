@@ -20,6 +20,13 @@ class _TarotSpreadSelectScreenState extends State<TarotSpreadSelectScreen> {
   TarotSpreadType _type = TarotSpreadType.three;
   bool _loading = false;
 
+  // ✅ Fiyatlar (TL)
+  static const Map<TarotSpreadType, double> _prices = {
+    TarotSpreadType.three: 49.9,
+    TarotSpreadType.six: 79.9,
+    TarotSpreadType.twelve: 119.9,
+  };
+
   String _spreadToApi(TarotSpreadType t) {
     switch (t) {
       case TarotSpreadType.three:
@@ -68,6 +75,8 @@ class _TarotSpreadSelectScreenState extends State<TarotSpreadSelectScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final price = _prices[_type] ?? 0.0;
+
     return MysticScaffold(
       scrimOpacity: 0.72,
       patternOpacity: 0.22,
@@ -78,8 +87,8 @@ class _TarotSpreadSelectScreenState extends State<TarotSpreadSelectScreen> {
           children: [
             GlassCard(
               child: Text(
-                'Soru: ${widget.question}\n\n'
-                'Açılım türünü seç. Kart sayısı buna göre kilitlenecek.',
+                'Sorun:\n${widget.question}\n\n'
+                'Açılım türünü seç. Seçtiğin açılıma göre kart sayısı ve yorum derinliği belirlenir.',
                 style: const TextStyle(height: 1.35),
               ),
             ),
@@ -88,7 +97,7 @@ class _TarotSpreadSelectScreenState extends State<TarotSpreadSelectScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Açılım', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
+                  const Text('Açılım Türü', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
                   const SizedBox(height: 10),
                   Wrap(
                     spacing: 10,
@@ -103,6 +112,11 @@ class _TarotSpreadSelectScreenState extends State<TarotSpreadSelectScreen> {
                   Text(
                     'Pozisyonlar:\n- ${_type.positionsTr.join("\n- ")}',
                     style: TextStyle(color: Colors.white.withOpacity(0.85), height: 1.3),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    'Paket ücreti: ${price.toStringAsFixed(price == price.roundToDouble() ? 0 : 1)} ₺',
+                    style: const TextStyle(fontWeight: FontWeight.w900),
                   ),
                 ],
               ),
@@ -120,6 +134,10 @@ class _TarotSpreadSelectScreenState extends State<TarotSpreadSelectScreen> {
 
   Widget _chip(TarotSpreadType t) {
     final active = _type == t;
+
+    final price = _prices[t] ?? 0.0;
+    final priceText = price.toStringAsFixed(price == price.roundToDouble() ? 0 : 1);
+
     return InkWell(
       onTap: () => setState(() => _type = t),
       child: Container(
@@ -134,7 +152,7 @@ class _TarotSpreadSelectScreenState extends State<TarotSpreadSelectScreen> {
           children: [
             Icon(active ? Icons.check_circle : Icons.circle_outlined, size: 18, color: active ? Colors.amber : Colors.white54),
             const SizedBox(width: 8),
-            Text(t.label, style: const TextStyle(fontWeight: FontWeight.w800)),
+            Text('${t.label}  •  $priceText ₺', style: const TextStyle(fontWeight: FontWeight.w800)),
           ],
         ),
       ),

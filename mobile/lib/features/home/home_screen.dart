@@ -15,7 +15,7 @@ import '../birthchart/birthchart_intro_screen.dart';
 // ✅ Kişilik Analizi
 import '../personality/personality_intro_screen.dart';
 
-// ✅ NEW: Sinastri (Aşk Uyumu)
+// ✅ Sinastri
 import '../synastry/synastry_intro_screen.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -34,22 +34,18 @@ class HomeScreen extends StatelessWidget {
   }
 
   void _openNumerology(BuildContext context) {
-    debugPrint("[NAV] Numerology tapped");
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NumerologyIntroScreen()));
   }
 
   void _openBirthChart(BuildContext context) {
-    debugPrint("[NAV] BirthChart tapped");
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BirthChartIntroScreen()));
   }
 
   void _openPersonality(BuildContext context) {
-    debugPrint("[NAV] Personality tapped");
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PersonalityIntroScreen()));
   }
 
   void _openSynastry(BuildContext context) {
-    debugPrint("[NAV] Synastry tapped");
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SynastryIntroScreen()));
   }
 
@@ -64,8 +60,9 @@ class HomeScreen extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
               child: Column(
-                children: const [
-                  Text(
+                // ❗ const LIST KULLANMIYORUZ (Windows "Not a constant expression" fix)
+                children: [
+                  const Text(
                     'MysticAura',
                     style: TextStyle(
                       fontSize: 34,
@@ -74,7 +71,7 @@ class HomeScreen extends StatelessWidget {
                       color: Colors.white,
                     ),
                   ),
-                  SizedBox(height: 6),
+                  const SizedBox(height: 6),
                   Text(
                     'Kaderin, senin için hazır.',
                     style: TextStyle(
@@ -86,7 +83,7 @@ class HomeScreen extends StatelessWidget {
               ),
             ),
 
-            // ✅ Kartlar listesi (scroll alanı)
+            // ✅ Kartlar listesi
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -132,7 +129,6 @@ class HomeScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
 
-                    // ✅ Kişilik Analizi
                     FeatureCard(
                       title: 'Kişilik Analizi',
                       subtitle: 'Numeroloji + Doğum Haritası birleşik rapor + PDF indir.',
@@ -141,7 +137,6 @@ class HomeScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
 
-                    // ✅ NEW: Sinastri (Aşk Uyumu)
                     FeatureCard(
                       title: 'Sinastri (Aşk Uyumu)',
                       subtitle: 'İki kişinin doğum bilgileriyle uyum analizi + PDF rapor.',
@@ -162,9 +157,9 @@ class HomeScreen extends StatelessWidget {
                   top: BorderSide(color: Colors.white12, width: 0.5),
                 ),
               ),
-              child: Row(
+              child: const Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: const [
+                children: [
                   _BottomItem(icon: Icons.person_outline, label: 'Profil'),
                   _BottomItem(icon: Icons.chat_bubble_outline, label: 'Yorumlar'),
                   _BottomItem(icon: Icons.shopping_bag_outlined, label: 'Mağaza'),
@@ -189,7 +184,7 @@ class _BottomItem extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 22, color: Colors.white.withOpacity(0.75)),
+        Icon(icon, size: 22, color: Colors.white70),
         const SizedBox(height: 4),
         Text(
           label,

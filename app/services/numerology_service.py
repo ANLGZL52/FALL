@@ -1,4 +1,3 @@
-# app/services/numerology_service.py
 from __future__ import annotations
 
 from typing import Optional, Dict, Any
@@ -39,8 +38,9 @@ def generate(*, session: Session, reading_id: str) -> Dict[str, Any]:
     if not obj:
         raise RuntimeError("Numerology kaydı bulunamadı (generate).")
 
-    if not obj.get("is_paid", False):
-        raise RuntimeError("Ödeme yapılmadan AI yorumu üretilemez.")
+    # ✅ Ödeme zorunluluğu kaldırıldı
+    # if not obj.get("is_paid", False):
+    #     raise RuntimeError("Ödeme yapılmadan AI yorumu üretilemez.")
 
     if (obj.get("result_text") or "").strip():
         return obj

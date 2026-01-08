@@ -4,15 +4,17 @@ from __future__ import annotations
 import base64
 import json
 import os
+from dataclasses import dataclass
+from datetime import date, timedelta
 from typing import List, Dict, Any, Optional
 
 from openai import OpenAI
 from app.core.config import settings
 
 
-# -------------------------
-# Helpers
-# -------------------------
+# ============================================================
+# Core helpers
+# ============================================================
 
 def _require_key() -> str:
     key = (getattr(settings, "openai_api_key", "") or "").strip()
@@ -51,9 +53,8 @@ def _vision_model_name() -> str:
 
 def _max_output_tokens(default: int = 2500) -> int:
     """
-    Uzun metin (çok sayfa PDF) için.
+    Uzun metin için.
     .env -> OPENAI_MAX_OUTPUT_TOKENS=3000 gibi ayarlanabilir.
-    Not: Çok yüksek verirsen maliyet + latency artar.
     """
     v = getattr(settings, "openai_max_output_tokens", None)
     try:
@@ -62,6 +63,14 @@ def _max_output_tokens(default: int = 2500) -> int:
         return int(v)
     except Exception:
         return int(default)
+
+
+def _clamp_tokens(x: int, lo: int = 256, hi: int = 6000) -> int:
+    try:
+        x = int(x)
+    except Exception:
+        x = lo
+    return max(lo, min(hi, x))
 
 
 def _normalize_path(p: str) -> str:
@@ -89,10 +98,12 @@ def _to_data_url(path: str) -> str:
 
 
 def _parse_json_object(text: str) -> Optional[dict]:
+    """Model bazen JSON dışı yazarsa yakalamaya çalışır."""
     if not text:
         return None
     t = text.strip()
 
+    # direct
     try:
         obj = json.loads(t)
         if isinstance(obj, dict):
@@ -100,6 +111,7 @@ def _parse_json_object(text: str) -> Optional[dict]:
     except Exception:
         pass
 
+    # substring
     start = t.find("{")
     end = t.rfind("}")
     if start != -1 and end != -1 and end > start:
@@ -114,9 +126,49 @@ def _parse_json_object(text: str) -> Optional[dict]:
     return None
 
 
-# -------------------------
+def _infer_spread_count(spread_type: str, selected_cards: List[str]) -> int:
+    """
+    spread_type backend'den "three/six/twelve" gelebilir.
+    Tutmazsa selected_cards uzunluğundan yakalar.
+    """
+    st = (spread_type or "").lower().strip()
+
+    if "three" in st or st in ("3", "3card", "3-card"):
+        return 3
+    if "six" in st or st in ("6", "6card", "6-card"):
+        return 6
+    if "twelve" in st or st in ("12", "12card", "12-card"):
+        return 12
+
+    n = len(selected_cards or [])
+    if n in (3, 6, 12):
+        return n
+    return 6
+
+
+def _today_str_tr() -> str:
+    # UI’da “tarih bugüne ait değil” problemini kökten bitiriyoruz:
+    # prompt’a bugünün tarihini veriyoruz.
+    return date.today().isoformat()
+
+
+def _next_14_days_lines_tr() -> str:
+    """
+    14 günlük planı LLM'e net formatla verdiriyoruz:
+    model artık 2024 gibi saçmalık yazmasın.
+    """
+    d0 = date.today()
+    lines = []
+    for i in range(14):
+        di = d0 + timedelta(days=i)
+        # YYYY-MM-DD (Gün 1) formatı
+        lines.append(f"- {di.isoformat()} (Gün {i+1}):")
+    return "\n".join(lines)
+
+
+# ============================================================
 # ✅ Text-only OpenAI call
-# -------------------------
+# ============================================================
 
 def call_openai_text(*, system: str, user: str, max_output_tokens: Optional[int] = None) -> str:
     """
@@ -124,9 +176,10 @@ def call_openai_text(*, system: str, user: str, max_output_tokens: Optional[int]
     - tek yerden token kontrolü
     """
     client = _make_client()
+    mot = _clamp_tokens(int(max_output_tokens or _max_output_tokens()))
     resp = client.responses.create(
         model=_text_model_name(),
-        max_output_tokens=int(max_output_tokens or _max_output_tokens()),
+        max_output_tokens=mot,
         input=[
             {"role": "system", "content": [{"type": "input_text", "text": system}]},
             {"role": "user", "content": [{"type": "input_text", "text": user}]},
@@ -138,13 +191,13 @@ def call_openai_text(*, system: str, user: str, max_output_tokens: Optional[int]
     return out
 
 
-# -------------------------
+# ============================================================
 # Coffee (vision)
-# -------------------------
+# ============================================================
 
 def validate_coffee_images(image_paths: List[str]) -> Dict[str, Any]:
     client = _make_client()
-    images = [{"type": "input_image", "image_url": _to_data_url(p)} for p in image_paths[:5]]
+    images = [{"type": "input_image", "image_url": _to_data_url(p)} for p in (image_paths or [])[:5]]
 
     prompt = (
         "Sen bir görüntü doğrulama asistanısın.\n"
@@ -189,7 +242,7 @@ def generate_fortune(
     big_decision: Optional[str] = None,
 ) -> str:
     client = _make_client()
-    images = [{"type": "input_image", "image_url": _to_data_url(p)} for p in image_paths[:5]]
+    images = [{"type": "input_image", "image_url": _to_data_url(p)} for p in (image_paths or [])[:5]]
 
     system = (
         "Sen deneyimli bir kahve falcısısın.\n"
@@ -208,6 +261,7 @@ def generate_fortune(
     )
 
     user_text = (
+        f"Bugün: {_today_str_tr()}\n"
         f"Kullanıcı adı: {name}\n"
         f"Konu: {topic}\n"
         f"Soru: {question}\n"
@@ -220,8 +274,7 @@ def generate_fortune(
         model=_vision_model_name(),
         input=[
             {"role": "system", "content": [{"type": "input_text", "text": system}]},
-            {"role": "user", "content": [{"type": "input_text", "text": user_text}, *images]},
-        ],
+            {"role": "user", "content": [{"type": "input_text", "text": user_text}, *images]}],
     )
 
     out = (resp.output_text or "").strip()
@@ -230,13 +283,13 @@ def generate_fortune(
     return out
 
 
-# -------------------------
+# ============================================================
 # Hand (vision)
-# -------------------------
+# ============================================================
 
 def validate_hand_images(image_paths: List[str]) -> Dict[str, Any]:
     client = _make_client()
-    images = [{"type": "input_image", "image_url": _to_data_url(p)} for p in image_paths[:5]]
+    images = [{"type": "input_image", "image_url": _to_data_url(p)} for p in (image_paths or [])[:5]]
 
     prompt = (
         "Sen bir görüntü doğrulama denetçisisin.\n"
@@ -271,6 +324,25 @@ def validate_hand_images(image_paths: List[str]) -> Dict[str, Any]:
     return {"ok": ok, "reason": reason, "confidence": conf}
 
 
+def _call_openai_vision_json(*, prompt: str, image_paths: List[str], max_output_tokens: int = 1400) -> Dict[str, Any]:
+    """
+    Vision model çağrısı: SADECE JSON üretmeye zorlarız.
+    JSON parse edilemezse {} döner.
+    """
+    client = _make_client()
+    images = [{"type": "input_image", "image_url": _to_data_url(p)} for p in (image_paths or [])[:5]]
+
+    resp = client.responses.create(
+        model=_vision_model_name(),
+        max_output_tokens=_clamp_tokens(max_output_tokens, 256, 2500),
+        input=[{"role": "user", "content": [{"type": "input_text", "text": prompt}, *images]}],
+    )
+
+    raw = (resp.output_text or "").strip()
+    obj = _parse_json_object(raw)
+    return obj or {}
+
+
 def generate_hand_fortune(
     *,
     name: str,
@@ -282,46 +354,70 @@ def generate_hand_fortune(
     relationship_status: Optional[str] = None,
     big_decision: Optional[str] = None,
 ) -> str:
-    client = _make_client()
-    images = [{"type": "input_image", "image_url": _to_data_url(p)} for p in image_paths[:5]]
+    val = validate_hand_images(image_paths)
+    if not val.get("ok", False):
+        return "Görseller el fotoğrafı gibi görünmüyor."
+
+    vision_prompt = (
+        "Sen bir avuç içi GÖZLEMLEYİCİSİN. Fal yazmıyorsun.\n"
+        "Görev: Fotoğraflarda GERÇEKTEN gördüğün çizgi ve işaretleri özetle.\n"
+        "Uydurma yok. Emin değilsen 'unclear' yaz.\n"
+        "Sadece JSON döndür. JSON dışında hiçbir şey yazma.\n\n"
+        "Şu şemaya uy:\n"
+        "{\n"
+        '  "photo_quality": "good/medium/poor",\n'
+        '  "visibility": {"heart_line":"clear/partial/unclear","head_line":"clear/partial/unclear","life_line":"clear/partial/unclear","fate_line":"clear/partial/unclear"},\n'
+        '  "heart_line": {"depth":"deep/medium/shallow/unclear","shape":"curved/straight/unclear","breaks":"none/some/unclear","notes":"..."},\n'
+        '  "head_line": {"length":"long/medium/short/unclear","shape":"straight/curved/unclear","start":"joined/separate/unclear","notes":"..."},\n'
+        '  "life_line": {"depth":"deep/medium/shallow/unclear","continuity":"continuous/broken/unclear","arc":"wide/narrow/unclear","notes":"..."},\n'
+        '  "fate_line": {"presence":"clear/faint/none/unclear","breaks":"none/some/unclear","notes":"..."},\n'
+        '  "mounts": {"venus":"prominent/normal/flat/unclear","moon":"prominent/normal/flat/unclear","jupiter":"prominent/normal/flat/unclear","saturn":"prominent/normal/flat/unclear","apollo":"prominent/normal/flat/unclear","mercury":"prominent/normal/flat/unclear"},\n'
+        '  "special_marks": ["star/triangle/cross/island/none/unclear"],\n'
+        '  "overall_notes": "Sadece gördüklerin"\n'
+        "}\n"
+    )
+
+    obs = _call_openai_vision_json(prompt=vision_prompt, image_paths=image_paths, max_output_tokens=1600)
+    obs_text = json.dumps(obs, ensure_ascii=False)
 
     system = (
-        "Sen deneyimli bir el falcısısın.\n"
+        "Sen çok deneyimli bir el falcısısın.\n"
         "Dil: Türkçe.\n"
-        "Biçim: liste/başlık yok, düz yazı.\n"
-        "Uydurma yok, olasılık dili.\n"
-        "Eğer görseller el/avuç içi gibi görünmüyorsa, sadece şu tek cümleyi yaz ve dur:\n"
-        "'Görseller el fotoğrafı gibi görünmüyor.'\n"
+        "Ton: samimi, sıcak, güven verici; mistik ama abartısız.\n"
+        "Biçim: KESİNLİKLE madde işareti/numara/başlık yok. Sadece düz yazı.\n"
+        "Uydurma yok: SADECE verilen GÖZLEM verisine dayan.\n"
+        "Kesin kehanet yok: olasılık dili.\n"
+        "Korkutma yok.\n\n"
+        "ZORUNLU ÇIKTI:\n"
+        "- En az 1200 kelime.\n"
+        "- 8–12 paragraf.\n"
+        "- Topic & Question'a en az 3 paragraf direkt cevap.\n"
+        "- Metin boyunca en az 6 kez 'gözlem net/partial/unclear' gibi referanslar yap.\n"
+        "- Sonda tek paragraf: 14 günlük mini plan (BUGÜNDEN başlayarak tarihli).\n"
+        "- Tarihler KESİNLİKLE sabit/örnek tarih olmayacak.\n"
     )
 
     user_text = (
+        f"Bugün: {_today_str_tr()}\n"
+        f"14 gün şablonu:\n{_next_14_days_lines_tr()}\n\n"
         f"İsim: {name}\n"
         f"Konu: {topic}\n"
         f"Soru: {question}\n"
         f"Baskın el: {dominant_hand or 'belirtilmedi'}\n"
         f"Fotoğraftaki el: {photo_hand or 'belirtilmedi'}\n"
         f"İlişki durumu: {relationship_status or 'belirtilmedi'}\n"
-        f"Büyük karar: {big_decision or 'belirtilmedi'}\n"
-        "İstek: Akıcı bir yorum yaz.\n"
+        f"Büyük karar: {big_decision or 'belirtilmedi'}\n\n"
+        "Aşağıdaki GÖZLEM JSON'una dayanarak uzun ve derin bir el falı yaz.\n"
+        "Eğer bazı alanlar 'unclear/partial' ise bunu açıkça söyle.\n\n"
+        f"[GÖZLEM JSON]\n{obs_text}\n"
     )
 
-    resp = client.responses.create(
-        model=_vision_model_name(),
-        input=[
-            {"role": "system", "content": [{"type": "input_text", "text": system}]},
-            {"role": "user", "content": [{"type": "input_text", "text": user_text}, *images]},
-        ],
-    )
-
-    out = (resp.output_text or "").strip()
-    if not out:
-        raise RuntimeError("OpenAI boş yanıt döndü. (output_text empty)")
-    return out
+    return call_openai_text(system=system, user=user_text, max_output_tokens=_max_output_tokens(3200))
 
 
-# -------------------------
-# Tarot (text-only)
-# -------------------------
+# ============================================================
+# ✅ Tarot (text-only)
+# ============================================================
 
 def generate_tarot_reading(
     *,
@@ -332,28 +428,63 @@ def generate_tarot_reading(
     spread_type: str,
     selected_cards: List[str],
 ) -> str:
+    count = _infer_spread_count(spread_type, selected_cards)
+
+    if count == 3:
+        min_words, max_words = 900, 1200
+        token_default = 2200
+        spread_label = "3 Kart Açılımı (Geçmiş–Şimdi–Yakın Gelecek)"
+    elif count == 6:
+        min_words, max_words = 1400, 1900
+        token_default = 2800
+        spread_label = "6 Kart Açılımı (Sen–Karşı Taraf–Aranız–Engel–Tavsiye–Sonuç)"
+    else:
+        min_words, max_words = 2200, 3000
+        token_default = 3600
+        spread_label = "12 Kart Premium Açılımı (Genel Enerji…Kapanış)"
+
     system = (
-        "Sen üst düzey deneyimli bir Tarot yorumcususun.\n"
+        "Sen üst düzey, deneyimli bir Tarot yorumcususun.\n"
         "Dil: Türkçe.\n"
-        "Derin, katmanlı, içgörülü yaz.\n"
-        "Kesin kehanet yok.\n"
+        "Ton: profesyonel, güven verici, sezgisel ama abartısız.\n\n"
+        "TEMEL KURALLAR:\n"
+        "- Tarot kesin kehanet değildir; olasılık dili kullan.\n"
+        "- Korkutma yok, sağlık/ölüm gibi ağır iddialar yok.\n"
+        "- Genel geçer cümlelerle geçiştirme yok; her şey soruya bağlanacak.\n\n"
+        "ZORUNLU YAPI (başlıklar kullan):\n"
+        "1) Genel Açılım Enerjisi (8-12 cümle)\n"
+        "2) Kart Kart Detaylı Yorum (tüm kartlar sırayla; her kart için 2-4 paragraf)\n"
+        "3) Kartlar Arası İlişki Analizi\n"
+        "4) Sorunun Özüne Net Cevap (en az 3 paragraf)\n"
+        "5) Gözden Kaçan Mesajlar / Bilinçaltı (1-2 paragraf)\n"
+        "6) Net Mesaj (5–7 cümle)\n"
+        "7) Önümüzdeki 14 Gün Mini Plan (BUGÜNDEN başlayarak tarihli)\n"
+        "8) Dikkat & Denge (2-4 cümle)\n"
+        "9) Kapanış\n\n"
+        f"Uzunluk zorunluluğu: {min_words}-{max_words} kelime.\n"
+        "Kısa/üstünkörü çıktı yasak.\n"
+        "14 günlük planda sabit/örnek tarih kullanma.\n"
     )
 
     user = (
+        f"Bugün: {_today_str_tr()}\n"
+        f"14 gün şablonu:\n{_next_14_days_lines_tr()}\n\n"
         f"Danışan: {name}{f' ({age})' if age is not None else ''}\n"
         f"Konu: {topic}\n"
         f"Soru: {question}\n"
-        f"Açılım: {spread_type}\n"
-        f"Kartlar: {', '.join(selected_cards)}\n"
-        "İstek: Pozisyon bazlı derin yorum.\n"
+        f"Açılım: {spread_type} -> {spread_label}\n"
+        f"Kartlar (id|R/U): {', '.join(selected_cards)}\n\n"
+        "Notlar:\n"
+        "- Kartları pozisyon sırasına göre yorumla.\n"
+        "- Kart id'lerinden isim çıkaramıyorsan id üzerinden sembolik yorum yap.\n"
     )
 
-    return call_openai_text(system=system, user=user)
+    return call_openai_text(system=system, user=user, max_output_tokens=_max_output_tokens(token_default))
 
 
-# -------------------------
+# ============================================================
 # Numerology (text-only)
-# -------------------------
+# ============================================================
 
 def generate_numerology_reading(
     *,
@@ -365,39 +496,46 @@ def generate_numerology_reading(
     q = (question or "").strip() or "Genel numeroloji yorumu istiyorum."
 
     system = (
-        "Sen profesyonel bir numeroloji uzmanısın.\n"
+        "Sen üst düzey profesyonel bir numeroloji analistisin.\n"
         "Dil: Türkçe.\n"
-        "Üslup: sıcak, mistik ama boş genelleme yok; somut ve açıklayıcı.\n"
-        "Korkutma yok, kesin hüküm yok.\n"
-        "Derinlik: Orta-üst.\n"
+        "Ton: sıcak, güven verici, olgun ve danışman gibi.\n"
+        "Kesin kehanet yok; olasılık dili kullan.\n"
+        "Korkutma yok; sağlık/ölüm gibi ağır iddialar yok.\n"
+        "Boş genelleme yok: her paragraf kullanıcının verisine ve sorusuna bağlanacak.\n\n"
+        "BİÇİM KURALI:\n"
+        "- Liste/madde işareti/numaralandırma YOK.\n"
+        "- Sadece akıcı düz yazı.\n"
+        "- 10–14 paragraf.\n\n"
+        "ZORUNLU KALİTE:\n"
+        "- Doğum tarihinden yaşam yolu hesaplamasını metin içinde anlaşılır şekilde yap.\n"
+        "- 11/22/33 gibi master sayıları koru.\n"
+        "- Kullanıcının sorusuna en az 4 paragraf direkt cevap ver.\n"
+        "- Sonda tek paragrafta: 14 günlük mini plan (BUGÜNDEN başlayarak tarihli).\n"
+        "- Tarihler sabit/örnek olmayacak.\n"
+        "- Uzunluk: en az 1800 kelime.\n"
     )
 
     user = f"""
-Kullanıcı bilgileri:
+Bugün: {_today_str_tr()}
+14 gün şablonu:
+{_next_14_days_lines_tr()}
+
+Kullanıcı:
 - Ad: {name}
 - Doğum tarihi: {birth_date}
 - Konu: {topic}
 - Soru: {q}
 
-İstenen içerik:
-1) Kısa özet (6-8 cümle)
-2) Yaşam Yolu sayısını doğum tarihinden hesapla ve adımları göster (11/22/33 korunur)
-3) Karakter çekirdeği (motivasyonlar, değerler, gölge taraf)
-4) İlişki stili (yakınlık/alan ihtiyacı, tetikleyiciler)
-5) Kariyer-para stili (para psikolojisi, risk iştahı, planlama)
-6) 12 somut öneri (kısa ama uygulanabilir)
-7) 14 günlük mini enerji planı (gün gün, tek satır)
-8) Kapanış (tek paragraf)
-
-Uzunluk hedefi: 1200-1800 kelime.
+İstek:
+Bu verilerle çok kapsamlı ve derin bir numeroloji analizi yaz.
 """.strip()
 
-    return call_openai_text(system=system, user=user)
+    return call_openai_text(system=system, user=user, max_output_tokens=_max_output_tokens(3600))
 
 
-# -------------------------
-# BirthChart (text-only)
-# -------------------------
+# ============================================================
+# BirthChart (text-only) ✅ GÜÇLENDİRİLDİ
+# ============================================================
 
 def generate_birthchart_reading(
     *,
@@ -410,44 +548,82 @@ def generate_birthchart_reading(
     question: Optional[str] = None,
 ) -> str:
     q = (question or "").strip() or "Genel doğum haritası yorumu istiyorum."
+    has_time = bool((birth_time or "").strip())
 
     system = (
-        "Sen profesyonel bir astrologsun.\n"
+        "Sen profesyonel bir astroloji yorum asistanısın.\n"
         "Dil: Türkçe.\n"
-        "Üslup: mistik ama boş genelleme yok; somut ve açıklayıcı.\n"
-        "Korkutma yok, kesin hüküm yok.\n"
-        "Önemli: Doğum saati yoksa bunu açıkça belirt ve yorumu 'genel' temalar üzerinden kur.\n"
-        "Derinlik: Orta-üst.\n"
+        "Ton: profesyonel, sıcak, motive edici; abartısız.\n"
+        "Kesin kader/kehanet dili yok; olasılık dili kullan.\n"
+        "Korkutma yok (sağlık/ölüm vb.).\n"
+        "Boş genelleme yok; her bölüm kullanıcı verisine ve konu/soruya bağlanacak.\n"
+        "Saat yoksa yükselen/ev/ASC iddiası yapma.\n"
+        "Çıktı Markdown başlıkları ile yapılandırılacak.\n"
+    )
+
+    time_note = (
+        "Doğum saati VERİLMİŞ. Yorumlarda olasılık diliyle daha net vurgu yapabilirsin; kesinlik kurma."
+        if has_time
+        else
+        "Doğum saati BİLİNMİYOR. Yükselen/ev yerleşimleri gibi kesin teknik iddialar YAPMA."
     )
 
     user = f"""
-Kullanıcı bilgileri:
+Bugün: {_today_str_tr()}
+
+Kullanıcı:
 - Ad: {name}
 - Doğum tarihi: {birth_date}
-- Doğum saati: {birth_time or 'bilinmiyor'}
+- Doğum saati: {birth_time or "Bilinmiyor"}
 - Doğum yeri: {birth_city}, {birth_country}
 - Konu: {topic}
 - Soru: {q}
 
-İstenen içerik:
-1) Kısa özet (6-8 cümle)
-2) Harita veri kontrolü (saat varsa/ yoksa etkisi)
-3) Kişilik temaları (liderlik, duygu düzeni, iletişim, ilişki dili)
-4) Gölge taraf + tetikleyiciler + dengeleme önerileri
-5) Konu özel yorum (topic ağırlıklı)
-6) 12 somut öneri
-7) 14 günlük mini enerji planı (gün gün, tek satır)
-8) Kapanış (tek paragraf)
+Kritik not:
+- {time_note}
 
-Uzunluk hedefi: 1400-2000 kelime.
+Kurallar:
+- En az 1200 kelime hedefle; ideal 1400-2200.
+- Topic merkeze alınacak.
+- Sağlık/ölüm gibi korkutucu kehanet yok.
+
+İskelet:
+
+### 1) Kısa Özet (5-7 madde)
+- (Madde madde)
+
+### 2) Veri Notu ve Netlik Seviyesi
+- (2 paragraf)
+
+### 3) Çekirdek Kişilik Temaları (Güçlü + Gölge)
+- Güçlü yönler
+- Gölge yönler
+- Dengeleme önerileri (en az 5 madde)
+
+### 4) İlişki Dinamikleri
+- En az 7 net öneri
+
+### 5) Kariyer / Para Temaları
+- En az 7 net öneri
+
+### 6) Yakın Dönem Enerjileri
+- (3-6 ay) ve (12 ay)
+
+### 7) {topic} İçin Net Öneriler (en az 9 madde)
+
+### 8) “Bugünden Başlayarak” 5 Aksiyon Planı
+- 5 madde
+
+### 9) Not
+- kısa kapanış
 """.strip()
 
-    return call_openai_text(system=system, user=user)
+    return call_openai_text(system=system, user=user, max_output_tokens=_max_output_tokens(3800))
 
 
-# -------------------------
+# ============================================================
 # Personality Fusion (Numerology + BirthChart -> TEK metin)
-# -------------------------
+# ============================================================
 
 def generate_personality_fusion_reading(
     *,
@@ -465,28 +641,31 @@ def generate_personality_fusion_reading(
 
     system = (
         "Sen elit seviyede bir 'BİRLEŞİK KİŞİLİK ANALİSTİ'sin.\n"
-        "Elindeki iki kaynaktan (Numeroloji + Doğum Haritası) bilgileri HARMANLAYIP TEK BİR PROFİL çıkaracaksın.\n\n"
-        "KRİTİK KURAL: İki metni yan yana ekleme / blok blok gitme.\n"
-        "Kural: Aynı şeyi iki kere söyleme.\n"
-        "Kural: 'Numeroloji şöyle, astroloji böyle' diye ayıran dil kullanma.\n"
-        "Kural: Her bölümde iki kaynaktan da izler taşı (karıştır).\n"
-        "Kural: Kesin kehanet yok; olasılık dili; korkutma yok.\n\n"
-        "Biçim: Başlıklar olabilir ama '### Numeroloji' / '### Doğum Haritası' gibi ayıran başlıklar YOK.\n"
-        "Çıktı bölümleri şu sırada olsun:\n"
-        "1) Net özet (8-12 cümle)\n"
-        "2) Entegre çekirdek profil (motivasyonlar, değerler, kimlik dili)\n"
-        "3) Duygusal düzen & stres (tetikleyiciler + regülasyon teknikleri)\n"
-        "4) İlişki dinamikleri (davranış örnekleri + 10 öneri)\n"
-        "5) Kariyer/para tarzı (strateji + risk noktaları + 10 öneri)\n"
-        "6) Gölge çalışma planı (alışkanlıklar, sabote eden kalıplar, 6 haftalık pratik)\n"
-        "7) 14 günlük mini plan (gün gün, tek satır)\n"
-        "8) 90 günlük yol haritası (haftalık başlıklar halinde)\n"
-        "9) Kapanış (1 paragraf, motive edici)\n\n"
-        "Uzunluk: 2600-3600 kelime (PDF’de 7-8 sayfa hedef).\n"
+        "Elindeki iki kaynaktan (Numeroloji + Doğum Haritası) bilgileri HARMANLAYIP TEK BİR PROFİL çıkaracaksın.\n"
+        "İki metni yan yana ekleme.\n"
+        "‘Numeroloji şöyle / astroloji böyle’ diye ayıran dil kullanma.\n"
+        "Aynı şeyi tekrarlama.\n"
+        "Kesin kehanet yok; korkutma yok.\n\n"
+        "Çıktı bölümleri:\n"
+        "1) Net özet\n"
+        "2) Entegre çekirdek profil\n"
+        "3) Duygusal düzen & stres\n"
+        "4) İlişki dinamikleri\n"
+        "5) Kariyer/para tarzı\n"
+        "6) Gölge çalışma planı (6 hafta)\n"
+        "7) 14 günlük mini plan (BUGÜNDEN başlayarak tarihli)\n"
+        "8) 90 günlük yol haritası\n"
+        "9) Kapanış\n\n"
+        "Uzunluk: 2600-3600 kelime.\n"
+        "14 günlük planda sabit/örnek tarih kullanma.\n"
         "Dil: Türkçe."
     )
 
     user = f"""
+Bugün: {_today_str_tr()}
+14 gün şablonu:
+{_next_14_days_lines_tr()}
+
 Kullanıcı:
 - Ad: {name}
 - Doğum tarihi: {birth_date}
@@ -495,7 +674,7 @@ Kullanıcı:
 - Konu: {topic}
 - Soru: {q}
 
-Aşağıda iki ayrı kaynak analiz metni var. Bunları HARMLA ve TEK bir birleşik kişilik analizi yaz:
+Aşağıda iki ayrı metin var. Bunları harmanlayıp TEK bir birleşik analiz yaz:
 
 [NUMEROLOJİ METNİ]
 {numerology_text}
@@ -504,15 +683,14 @@ Aşağıda iki ayrı kaynak analiz metni var. Bunları HARMLA ve TEK bir birleş
 {birthchart_text}
 """.strip()
 
-    # fusion çıktısı uzun olduğu için token'i yükselt
-    return call_openai_text(system=system, user=user, max_output_tokens=_max_output_tokens(3000))
+    return call_openai_text(system=system, user=user, max_output_tokens=_max_output_tokens(3600))
 
 
 def generate_personality_reading(
     *,
     name: str,
     birth_date: str,               # YYYY-MM-DD
-    birth_time: Optional[str],     # HH:MM (opsiyonel)
+    birth_time: Optional[str],     # HH:MM
     birth_city: str,
     birth_country: str,
     topic: str,
@@ -548,9 +726,9 @@ def generate_personality_reading(
     )
 
 
-# -------------------------
-# ✅ SYNSTRY (Aşk Uyumu / Sinastri) - yeni feature için
-# -------------------------
+# ============================================================
+# ✅ Synastry (Sinastri)
+# ============================================================
 
 def generate_synastry_reading(
     *,
@@ -573,16 +751,16 @@ def generate_synastry_reading(
         "Sen elit seviyede bir SİNASTRİ (aşk uyumu) analistisin.\n"
         "Yaklaşım: numeroloji + doğum haritası temaları.\n"
         "İki kişiyi ayrı ayrı anlatıp yapıştırma; her bölümde iki kişiyi birlikte ele al.\n"
-        "Kesin kehanet yok; olasılık dili; korkutma yok.\n\n"
+        "Kesin kehanet yok; korkutma yok.\n\n"
         "ÇIKTI ŞU YAPIYLA:\n"
-        "1) 8-10 cümle özet + ilişkinin ana teması\n"
-        "2) Çekim/uyum profili (iletişim, güven, çatışma) — örnek davranışlarla\n"
+        "1) Özet + ilişkinin ana teması\n"
+        "2) Çekim/uyum profili\n"
         "3) Duygusal tetikleyiciler + çözüm ritüelleri\n"
-        "4) İletişim dili: büyüten/kıran konuşma örnekleri\n"
+        "4) İletişim dili örnekleri\n"
         "5) Romantik kimya + sınırlar\n"
-        "6) Uzun vadeli uyum: para/aile/ortak yaşam\n"
+        "6) Uzun vadeli uyum: para/aile/yaşam\n"
         "7) Risk haritası: 6-10 risk + her risk için 1 önlem\n"
-        "8) 21 günlük ilişki planı: gün gün kısa\n"
+        "8) 21 günlük ilişki planı (BUGÜNDEN itibaren gün gün; sabit tarih yok)\n"
         "9) Kapanış\n\n"
         "Doğum saati eksikse bunu belirt, yorumları daha genel kur.\n"
         "Dil: Türkçe.\n"
@@ -590,6 +768,8 @@ def generate_synastry_reading(
     )
 
     user = f"""
+Bugün: {_today_str_tr()}
+
 Konu: {topic}
 Soru: {q}
 
@@ -605,7 +785,7 @@ Partner B:
 - Saat: {birth_time_b or "bilinmiyor"}
 - Yer: {birth_city_b}, {birth_country_b}
 
-İstek: Çok detaylı sinastri üret (PDF’de 6-8 sayfa hedef).
+İstek: Çok detaylı sinastri üret.
 """.strip()
 
-    return call_openai_text(system=system, user=user, max_output_tokens=_max_output_tokens(3200))
+    return call_openai_text(system=system, user=user, max_output_tokens=_max_output_tokens(3600))

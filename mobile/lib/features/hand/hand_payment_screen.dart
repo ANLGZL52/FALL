@@ -25,7 +25,7 @@ class _HandPaymentScreenState extends State<HandPaymentScreen> {
       final res = await PaymentApi.startPayment(
         readingId: widget.readingId,
         product: "hand",
-        // amount: 149.0, // istersen gönder, göndermesen de backend default veriyor
+        // amount: 50.0, // istersen burada net fiyat gönderebilirsin
       );
 
       if (!res.ok) {
@@ -39,7 +39,7 @@ class _HandPaymentScreenState extends State<HandPaymentScreen> {
       // 2) Mark paid
       await HandApi.markPaid(readingId: widget.readingId, paymentRef: res.paymentId);
 
-      // 3) Generate
+      // 3) Generate (backend yorum üretir)
       final reading = await HandApi.generate(readingId: widget.readingId);
 
       if (!mounted) return;
@@ -68,18 +68,26 @@ class _HandPaymentScreenState extends State<HandPaymentScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: const [
-                  Text('El Falı Paketi', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                  Text(
+                    'El Falı',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                  ),
                   SizedBox(height: 10),
                   Text(
-                    'Ödeme tamamlandıktan sonra el fotoğrafların analiz edilerek falın hazırlanacak.\n\n'
-                    'Not: El dışında görsel yüklenirse sistem zaten ödeme adımına geçirmez.',
+                    'Avucundaki çizgiler, karakterin ve yolun hakkında küçük ipuçları taşır.\n'
+                    'Şimdi bu ipuçlarını birlikte yorumlayalım.',
+                  ),
+                  SizedBox(height: 12),
+                  Text(
+                    'Tutar: 50₺',
+                    style: TextStyle(fontWeight: FontWeight.w800),
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 18),
             GradientButton(
-              text: _loading ? 'İşleniyor...' : 'Ödemeyi Tamamla & Yorumu Al',
+              text: _loading ? 'İşleniyor...' : 'Falımı Başlat ✨',
               onPressed: _loading ? null : _payAndGenerate,
             ),
           ],

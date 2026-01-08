@@ -1,7 +1,8 @@
 from typing import Optional, Literal
 from pydantic import BaseModel
 
-ProductType = Literal["coffee", "hand"]
+# ✅ tarot eklendi
+ProductType = Literal["coffee", "hand", "tarot"]
 
 
 class StartPaymentRequest(BaseModel):

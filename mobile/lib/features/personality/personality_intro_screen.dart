@@ -1,15 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:fall_app/widgets/mystic_scaffold.dart';
-import 'personality_info_screen.dart';
+import 'personality_form_screen.dart';
 
 class PersonalityIntroScreen extends StatelessWidget {
   const PersonalityIntroScreen({super.key});
-
-  void _goInfo(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const PersonalityInfoScreen()),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -26,61 +20,68 @@ class PersonalityIntroScreen extends StatelessWidget {
                   onPressed: () => Navigator.pop(context),
                   icon: const Icon(Icons.arrow_back, color: Colors.white),
                 ),
-                const Text(
-                  "Kişilik Analizi",
-                  style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900),
+                const Expanded(
+                  child: Text(
+                    "Kişilik Analizi",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ],
             ),
-            const Spacer(),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 18),
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.45),
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: Colors.white12),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      "Bu içerik Numeroloji + Doğum Haritası verilerini birleştirerek\n"
-                      "kapsamlı kişilik, ilişki ve kariyer temaları çıkarır.",
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        height: 1.25,
-                        fontWeight: FontWeight.w700,
+            const SizedBox(height: 8),
+
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 18),
+                child: _GlassCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        "Bu analiz nasıl hazırlanır?",
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      "5 adım:\n"
-                      "1) Bilgileri gir\n"
-                      "2) Ödeme (mock)\n"
-                      "3) AI analizi üret\n"
-                      "4) Sonucu oku\n"
-                      "5) PDF indir",
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.85),
-                        fontSize: 14,
-                        height: 1.35,
-                        fontWeight: FontWeight.w800,
+                      const SizedBox(height: 10),
+                      Text(
+                        "Doğum tarihi ve yer bilgilerini; karakter, ilişki dili, kariyer/para yaklaşımı ve "
+                        "yakın dönem aksiyon önerileriyle birleştirerek bütüncül bir profil çıkarır. "
+                        "Bu bir farkındalık çalışmasıdır; kesin kehanet değildir.",
+                        style: TextStyle(color: Colors.white.withOpacity(0.86), height: 1.35),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      "Not: Doğum saati yoksa da devam edebilirsin; analiz daha genel olur.",
-                      style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 12, height: 1.35),
-                    ),
-                  ],
+                      const SizedBox(height: 12),
+                      Text(
+                        "Adımlar",
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.95),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      _StepRow(text: "Bilgileri gir"),
+                      _StepRow(text: "Onayla"),
+                      _StepRow(text: "Analiz hazırlanıyor"),
+                      _StepRow(text: "Sonucu oku ve PDF indir"),
+                      const SizedBox(height: 10),
+                      Text(
+                        "Not: Doğum saati opsiyoneldir. Saat girmezsen analiz daha genel yorumlanır.",
+                        style: TextStyle(color: Colors.white.withOpacity(0.70), fontSize: 12, height: 1.25),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
-            const Spacer(),
+
             Padding(
               padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
               child: SizedBox(
@@ -92,14 +93,64 @@ class PersonalityIntroScreen extends StatelessWidget {
                     foregroundColor: Colors.black,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   ),
-                  onPressed: () => _goInfo(context),
-                  child: const Text("Başla", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
+                  onPressed: () {
+                    Navigator.of(context).pushReplacement(
+                      MaterialPageRoute(builder: (_) => const PersonalityFormScreen()),
+                    );
+                  },
+                  child: const Text(
+                    "Başla",
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                  ),
                 ),
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _StepRow extends StatelessWidget {
+  final String text;
+  const _StepRow({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          const Icon(Icons.auto_awesome, color: Color(0xFFF5C361), size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(color: Colors.white.withOpacity(0.85), height: 1.25),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _GlassCard extends StatelessWidget {
+  final Widget child;
+  const _GlassCard({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.42),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: child,
     );
   }
 }

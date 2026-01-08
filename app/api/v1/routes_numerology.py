@@ -1,4 +1,3 @@
-# app/api/v1/routes_numerology.py
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,18 +10,8 @@ from app.services.openai_service import generate_numerology_reading
 router = APIRouter(prefix="/numerology", tags=["numerology"])
 _repo = NumerologyRepo()
 
-# -------------------------
-# DB dependency (projeye uyumlu fallback)
-# -------------------------
+
 def _make_get_db():
-    """
-    app.db içinde farklı patternler olabiliyor:
-    - SessionLocal (classic)
-    - get_db() (FastAPI dependency)
-    - get_session()
-    Bu fonksiyon hangisi varsa onu kullanır.
-    """
-    # 1) SessionLocal varsa
     try:
         from app.db import SessionLocal  # type: ignore
 
@@ -37,21 +26,18 @@ def _make_get_db():
     except Exception:
         pass
 
-    # 2) get_db varsa
     try:
         from app.db import get_db as get_db_dep  # type: ignore
         return get_db_dep
     except Exception:
         pass
 
-    # 3) get_session varsa
     try:
         from app.db import get_session as get_session_dep  # type: ignore
         return get_session_dep
     except Exception:
         pass
 
-    # hiçbirini bulamazsa net hata
     raise RuntimeError(
         "DB dependency bulunamadı. app/db.py içinde SessionLocal veya get_db veya get_session olmalı."
     )
@@ -60,9 +46,6 @@ def _make_get_db():
 get_db = _make_get_db()
 
 
-# -------------------------
-# Endpoints
-# -------------------------
 @router.post("/start", response_model=NumerologyReadingOut)
 def start(payload: NumerologyStartIn, db: Session = Depends(get_db)):
     try:
@@ -92,6 +75,7 @@ def get_reading(reading_id: str, db: Session = Depends(get_db)):
 
 @router.post("/{reading_id}/mark-paid", response_model=NumerologyReadingOut)
 def mark_paid(reading_id: str, payload: MarkPaidIn, db: Session = Depends(get_db)):
+    # Şimdilik kullanılmıyor ama endpoint dursun
     obj = _repo.mark_paid(session=db, reading_id=reading_id, payment_ref=payload.payment_ref)
     if not obj:
         raise HTTPException(status_code=404, detail="Numerology kaydı bulunamadı (mark-paid).")
@@ -104,8 +88,9 @@ def generate(reading_id: str, db: Session = Depends(get_db)):
     if not obj:
         raise HTTPException(status_code=404, detail="Numerology kaydı bulunamadı (generate).")
 
-    if not obj.get("is_paid", False):
-        raise HTTPException(status_code=402, detail="Ödeme yapılmadan AI yorumu üretilemez.")
+    # ✅ Ödeme zorunluluğu kaldırıldı (mock/şimdilik ödeme yok akışı)
+    # if not obj.get("is_paid", False):
+    #     raise HTTPException(status_code=402, detail="Ödeme yapılmadan AI yorumu üretilemez.")
 
     if (obj.get("result_text") or "").strip():
         return obj

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:fall_app/widgets/mystic_scaffold.dart';
-import 'personality_payment_screen.dart';
 import 'package:fall_app/services/personality_api.dart';
+import 'personality_payment_screen.dart';
 
 class PersonalityFormScreen extends StatefulWidget {
   const PersonalityFormScreen({super.key});
@@ -15,11 +15,8 @@ class _PersonalityFormScreenState extends State<PersonalityFormScreen> {
   final _cityCtrl = TextEditingController();
   final _questionCtrl = TextEditingController();
 
-  String _topic = "genel";
-
   DateTime? _birthDate;
   TimeOfDay? _birthTime; // opsiyonel
-
   bool _loading = false;
 
   String _fmtDate(DateTime d) {
@@ -27,7 +24,7 @@ class _PersonalityFormScreenState extends State<PersonalityFormScreen> {
     final m = d.month.toString().padLeft(2, "0");
     final day = d.day.toString().padLeft(2, "0");
     return "$y-$m-$day";
-  }
+    }
 
   String _fmtTime(TimeOfDay t) {
     final hh = t.hour.toString().padLeft(2, "0");
@@ -80,13 +77,14 @@ class _PersonalityFormScreenState extends State<PersonalityFormScreen> {
     setState(() => _loading = true);
 
     try {
+      // ✅ konu UI yok, backend'e sabit "genel" yolluyoruz
       final reading = await PersonalityApi.start(
         name: name,
         birthDate: _fmtDate(_birthDate!),
         birthTime: _birthTime == null ? null : _fmtTime(_birthTime!),
         birthCity: city,
         birthCountry: "TR",
-        topic: _topic,
+        topic: "genel",
         question: question.isEmpty ? null : question,
       );
 
@@ -96,13 +94,12 @@ class _PersonalityFormScreenState extends State<PersonalityFormScreen> {
         MaterialPageRoute(
           builder: (_) => PersonalityPaymentScreen(
             readingId: reading.id,
-            name: reading.name,
-            birthDate: reading.birthDate,
-            birthTime: reading.birthTime ?? "",
-            birthCity: reading.birthCity,
-            birthCountry: reading.birthCountry,
-            topic: reading.topic,
-            question: reading.question ?? "",
+            name: name,
+            birthDate: _fmtDate(_birthDate!),
+            birthTime: _birthTime == null ? "" : _fmtTime(_birthTime!),
+            birthCity: city,
+            birthCountry: "TR",
+            question: question,
           ),
         ),
       );
@@ -140,7 +137,7 @@ class _PersonalityFormScreenState extends State<PersonalityFormScreen> {
                 const Expanded(
                   child: Text(
                     "Kişilik Analizi – Bilgiler",
-                    style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800),
+                    style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
@@ -227,37 +224,17 @@ class _PersonalityFormScreenState extends State<PersonalityFormScreen> {
                     const SizedBox(height: 12),
 
                     _field(
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<String>(
-                          value: _topic,
-                          dropdownColor: const Color(0xFF0B1120),
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-                          iconEnabledColor: Colors.white70,
-                          items: const [
-                            DropdownMenuItem(value: "genel", child: Text("Konu: Genel")),
-                            DropdownMenuItem(value: "aşk", child: Text("Konu: Aşk")),
-                            DropdownMenuItem(value: "kariyer", child: Text("Konu: Kariyer")),
-                            DropdownMenuItem(value: "para", child: Text("Konu: Para")),
-                          ],
-                          onChanged: (v) => setState(() => _topic = v ?? "genel"),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    _field(
                       child: TextField(
                         controller: _questionCtrl,
                         maxLines: 3,
                         style: const TextStyle(color: Colors.white),
                         decoration: const InputDecoration(
-                          hintText: "Sorun (opsiyonel) (örn: 2026'da kariyerde ne öne çıkıyor?)",
+                          hintText: "İstersen ek not bırak (opsiyonel)",
                           hintStyle: TextStyle(color: Colors.white54),
                           border: InputBorder.none,
                         ),
                       ),
                     ),
-
                     const SizedBox(height: 18),
                   ],
                 ),
@@ -278,7 +255,7 @@ class _PersonalityFormScreenState extends State<PersonalityFormScreen> {
                   onPressed: _loading ? null : _continue,
                   child: _loading
                       ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text("Devam → Ödeme", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
+                      : const Text("Devam", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
                 ),
               ),
             ),

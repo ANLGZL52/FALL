@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:fall_app/widgets/mystic_scaffold.dart';
 import 'package:fall_app/services/numerology_api.dart';
-import 'package:fall_app/features/numerology/numerology_payment_screen.dart';
+import 'package:fall_app/features/numerology/numerology_loading_screen.dart';
 
 class NumerologyFormScreen extends StatefulWidget {
   const NumerologyFormScreen({super.key});
@@ -38,7 +38,7 @@ class _NumerologyFormScreenState extends State<NumerologyFormScreen> {
     if (picked != null) setState(() => _birth = picked);
   }
 
-  Future<void> _continueToPayment() async {
+  Future<void> _startAndGenerate() async {
     final name = _nameCtrl.text.trim();
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -63,13 +63,11 @@ class _NumerologyFormScreenState extends State<NumerologyFormScreen> {
       );
 
       if (!mounted) return;
-      Navigator.of(context).push(
+      Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => NumerologyPaymentScreen(
+          builder: (_) => NumerologyLoadingScreen(
             readingId: reading.id,
-            name: reading.name,
-            birthDate: reading.birthDate,
-            question: reading.question ?? "",
+            title: "Numeroloji Analizi",
           ),
         ),
       );
@@ -119,9 +117,13 @@ class _NumerologyFormScreenState extends State<NumerologyFormScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      "Gerekli Bilgiler",
-                      style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w900),
+                    Text(
+                      "Analiz için gerekli bilgiler",
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.95),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
                     const SizedBox(height: 12),
 
@@ -162,10 +164,20 @@ class _NumerologyFormScreenState extends State<NumerologyFormScreen> {
                         maxLines: 3,
                         style: const TextStyle(color: Colors.white),
                         decoration: const InputDecoration(
-                          hintText: "Sorun (örn: 2026 kariyerimde ne öne çıkıyor?)",
+                          hintText: "İstersen soru yaz (örn: 2026'da kariyerimde ne öne çıkıyor?)",
                           hintStyle: TextStyle(color: Colors.white54),
                           border: InputBorder.none,
                         ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
+                    Text(
+                      "Not: Bu analiz bir rehberdir; kesin hüküm değil, farkındalık ve yön gösterme amaçlıdır.",
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.70),
+                        fontSize: 12,
+                        height: 1.35,
                       ),
                     ),
                   ],
@@ -184,10 +196,10 @@ class _NumerologyFormScreenState extends State<NumerologyFormScreen> {
                     foregroundColor: Colors.black,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   ),
-                  onPressed: _loading ? null : _continueToPayment,
+                  onPressed: _loading ? null : _startAndGenerate,
                   child: _loading
                       ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text("Devam → Ödeme", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
+                      : const Text("Analizi Başlat", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
                 ),
               ),
             ),

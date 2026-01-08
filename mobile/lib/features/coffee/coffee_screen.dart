@@ -124,7 +124,12 @@ class _CoffeeScreenState extends State<CoffeeScreen> {
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(12),
-                child: Image.file(_photos[i], fit: BoxFit.cover, width: double.infinity, height: double.infinity),
+                child: Image.file(
+                  _photos[i],
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                  height: double.infinity,
+                ),
               ),
               Positioned(
                 right: 4,
@@ -151,79 +156,76 @@ class _CoffeeScreenState extends State<CoffeeScreen> {
   @override
   Widget build(BuildContext context) {
     return MysticScaffold(
-      scrimOpacity: 0.82,  // ✅ KAHVE ekranı: daha koyu -> butonlar net
+      scrimOpacity: 0.82,
       patternOpacity: 0.18,
       appBar: AppBar(title: const Text('Kahve Falı')),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: ListView(
-          children: [
-            _photoArea(),
-            const SizedBox(height: 12),
-
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _loading ? null : _pickFromCamera,
-                    icon: const Icon(Icons.photo_camera_outlined),
-                    label: const Text('Kamera'),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: ListView(
+            children: [
+              _photoArea(),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _loading ? null : _pickFromCamera,
+                      icon: const Icon(Icons.photo_camera_outlined),
+                      label: const Text('Kamera'),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _loading ? null : _pickFromGalleryMulti,
-                    icon: const Icon(Icons.photo_library_outlined),
-                    label: const Text('Galeri (çoklu)'),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _loading ? null : _pickFromGalleryMulti,
+                      icon: const Icon(Icons.photo_library_outlined),
+                      label: const Text('Galeri (çoklu)'),
+                    ),
                   ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 18),
-
-            GlassCard(
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  children: [
-                    TextFormField(
-                      controller: _topicController,
-                      decoration: const InputDecoration(labelText: 'Konu (Aşk/İş/Para/Genel)'),
-                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Zorunlu' : null,
-                    ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: _questionController,
-                      maxLines: 3,
-                      decoration: const InputDecoration(labelText: 'Sorun / odak noktan'),
-                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Zorunlu' : null,
-                    ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: _nameController,
-                      decoration: const InputDecoration(labelText: 'İsim'),
-                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Zorunlu' : null,
-                    ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: _ageController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Yaş (opsiyonel)'),
-                    ),
-                  ],
+                ],
+              ),
+              const SizedBox(height: 18),
+              GlassCard(
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    children: [
+                      TextFormField(
+                        controller: _topicController,
+                        decoration: const InputDecoration(labelText: 'Konu (Aşk/İş/Para/Genel)'),
+                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Zorunlu' : null,
+                      ),
+                      const SizedBox(height: 10),
+                      TextFormField(
+                        controller: _questionController,
+                        maxLines: 3,
+                        decoration: const InputDecoration(labelText: 'Sorun / odak noktan'),
+                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Zorunlu' : null,
+                      ),
+                      const SizedBox(height: 10),
+                      TextFormField(
+                        controller: _nameController,
+                        decoration: const InputDecoration(labelText: 'İsim'),
+                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Zorunlu' : null,
+                      ),
+                      const SizedBox(height: 10),
+                      TextFormField(
+                        controller: _ageController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(labelText: 'Yaş (opsiyonel)'),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-
-            const SizedBox(height: 18),
-
-            GradientButton(
-              text: _loading ? 'Yükleniyor...' : 'Fal Başlat (Ödeme Adımına Geç)',
-              onPressed: _loading ? null : _submit,
-            ),
-          ],
+              const SizedBox(height: 18),
+              GradientButton(
+                text: _loading ? 'Yükleniyor...' : 'Fal Başlat (Ödeme Adımına Geç)',
+                onPressed: _loading ? null : _submit,
+              ),
+            ],
+          ),
         ),
       ),
     );

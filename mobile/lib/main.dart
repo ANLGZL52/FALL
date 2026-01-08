@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:device_preview/device_preview.dart';
 
 import 'core/app_theme.dart';
 import 'features/home/home_screen.dart';
@@ -9,7 +11,13 @@ import 'features/synastry/synastry_intro_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const FallApp());
+
+  runApp(
+    DevicePreview(
+      enabled: !kReleaseMode, // debug modda açık
+      builder: (context) => const FallApp(),
+    ),
+  );
 }
 
 class FallApp extends StatelessWidget {
@@ -19,27 +27,31 @@ class FallApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
+
+      // ✅ DevicePreview için gerekli
+      useInheritedMediaQuery: true,
+      locale: DevicePreview.locale(context),
+      builder: DevicePreview.appBuilder,
+
       theme: AppTheme.dark(),
+
+      // ✅ İlk ekran
       home: const HomeScreen(),
 
-      // ✅ Varsayılan dil: Türkçe
-      locale: const Locale('tr', 'TR'),
-
-      // ✅ Desteklenen diller
+      // ✅ TR/EN
       supportedLocales: const [
         Locale('tr', 'TR'),
         Locale('en', 'US'),
       ],
-
-      // ✅ Flutter localization delegeleri
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
 
-      // ✅ Named routes (home’u bozmadan ekledik)
+      // ✅ Named routes (Ana sayfaya dön gibi yerler için)
       routes: {
+        '/home': (_) => const HomeScreen(),
         '/synastry': (_) => const SynastryIntroScreen(),
       },
     );

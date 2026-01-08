@@ -26,7 +26,7 @@ class MysticBackground extends StatelessWidget {
       children: [
         // 🔮 Background image
         Image.asset(
-          'assets/backgrounds/ChatGPT Image 24 Ara 2025 21_38_14.png',
+          'assets/backgrounds/ChatGPT Image 3 Oca 2026 18_20_30.png',
           fit: BoxFit.cover,
         ),
 

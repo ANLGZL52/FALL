@@ -69,7 +69,6 @@ class _TarotSelectScreenState extends State<TarotSelectScreen> {
 
     setState(() => _loading = true);
     try {
-      // backend’e: "<id>|R" veya "<id>|U"
       final cards = _picked.map((c) {
         final revFlag = c.isReversed ? "R" : "U";
         return "${c.id}|$revFlag";
@@ -112,228 +111,229 @@ class _TarotSelectScreenState extends State<TarotSelectScreen> {
       scrimOpacity: 0.78,
       patternOpacity: 0.18,
       appBar: AppBar(
-        title: Text(widget.spreadType.label),
+        title: Text(
+          widget.spreadType.label,
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: [
-          IconButton(onPressed: _loading ? null : _reset, icon: const Icon(Icons.refresh)),
+          IconButton(
+            onPressed: _loading ? null : _reset,
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Sıfırla',
+          ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            GlassCard(
-              child: Text(
-                "Soru: ${widget.question}\n"
-                "Seçim: ${widget.spreadType.label}\n"
-                "Kart seç: ${_picked.length} / $_need\n"
-                "readingId: ${widget.readingId}",
-                style: const TextStyle(height: 1.25),
+
+      // ✅ ÇAKIŞMA FIX'İN ÖZÜ BURASI:
+      // SafeArea sayesinde body artık AppBar/statusbar altına girmiyor.
+      body: SafeArea(
+        top: true,
+        bottom: true,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              GlassCard(
+                child: Text(
+                  "Sorun: ${widget.question}\n"
+                  "Açılım: ${widget.spreadType.label}\n"
+                  "Seçim: ${_picked.length} / $_need kart",
+                  style: const TextStyle(height: 1.25),
+                ),
               ),
-            ),
 
-            // kırmızı alan yukarı gelsin
-            const SizedBox(height: 8),
+              const SizedBox(height: 10),
 
-            /// ✅ SLOT ALANI:
-            /// - 3 kart: yine yan yana sığar
-            /// - 6/12 kart: yatay scroll + daha kısa yükseklik
-            /// - overflow: Expanded + buffer
-            LayoutBuilder(
-              builder: (context, c) {
-                const gap = 10.0;
-                const cardAspect = 0.70;
+              /// ✅ SLOT ALANI
+              LayoutBuilder(
+                builder: (context, c) {
+                  const gap = 10.0;
+                  const cardAspect = 0.70;
 
-                // Kartları küçük tutuyoruz (6/12’de daha da küçülür)
-                final double maxSlotW = (_need <= 3)
-                    ? 150.0
-                    : (_need <= 6)
-                        ? 96.0
-                        : 82.0;
+                  final double maxSlotW = (_need <= 3)
+                      ? 150.0
+                      : (_need <= 6)
+                          ? 96.0
+                          : 82.0;
 
-                // ✅ slotW: ekrana göre akıllı
-                final double idealW =
-                    (c.maxWidth - gap * (_need - 1)) / _need; // hepsi sığarsa bu
-                final double slotW = math.max(
-                  64.0,
-                  math.min(maxSlotW, idealW.isFinite ? idealW : maxSlotW),
-                );
+                  final double idealW = (c.maxWidth - gap * (_need - 1)) / _need;
+                  final double slotW = math.max(
+                    64.0,
+                    math.min(maxSlotW, idealW.isFinite ? idealW : maxSlotW),
+                  );
 
-                final double cardH = slotW / cardAspect;
+                  final double cardH = slotW / cardAspect;
 
-                // ✅ OVERFLOW FIX: başlık + boşluk + kart + buffer
-                const headerH = 24.0;
-                const vGap = 8.0;
-                const extraBuffer = 56.0; // 40px taşmayı da rahat yutar
+                  const headerH = 24.0;
+                  const vGap = 8.0;
+                  const extraBuffer = 46.0; // biraz düşürdüm ama hâlâ güvenli
 
-                final slotAreaH = headerH + vGap + cardH + extraBuffer;
+                  final slotAreaH = headerH + vGap + cardH + extraBuffer;
 
-                return SizedBox(
-                  height: slotAreaH,
-                  child: GlassCard(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const SizedBox(
-                            height: headerH,
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                "Seçilen Kartlar",
-                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900),
+                  return SizedBox(
+                    height: slotAreaH,
+                    child: GlassCard(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const SizedBox(
+                              height: headerH,
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  "Seçilen Kartlar",
+                                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900),
+                                ),
                               ),
                             ),
-                          ),
-                          const SizedBox(height: vGap),
+                            const SizedBox(height: vGap),
 
-                          // ✅ Column taşmasın diye Expanded
-                          Expanded(
-                            child: Align(
-                              alignment: Alignment.topLeft,
-                              child: ListView.separated(
-                                scrollDirection: Axis.horizontal,
-                                physics: const BouncingScrollPhysics(),
-                                itemCount: _need,
-                                separatorBuilder: (_, __) => const SizedBox(width: gap),
-                                itemBuilder: (context, i) {
-                                  final hasCard = i < _picked.length;
-                                  final card = hasCard ? _picked[i] : null;
+                            Expanded(
+                              child: Align(
+                                alignment: Alignment.topLeft,
+                                child: ListView.separated(
+                                  scrollDirection: Axis.horizontal,
+                                  physics: const BouncingScrollPhysics(),
+                                  itemCount: _need,
+                                  separatorBuilder: (_, __) => const SizedBox(width: gap),
+                                  itemBuilder: (context, i) {
+                                    final hasCard = i < _picked.length;
+                                    final card = hasCard ? _picked[i] : null;
 
-                                  return SizedBox(
-                                    width: slotW,
-                                    child: Stack(
-                                      children: [
-                                        Positioned.fill(
-                                          child: TarotCardTile(
-                                            width: slotW,
-                                            height: cardH,
-                                            card: card,
-                                            faceUp: _revealed && hasCard,
-                                            disabled: true,
-                                            selected: hasCard,
-                                            badgeLabel: "${i + 1}",
-                                          ),
-                                        ),
-
-                                        // Pozisyon etiketi
-                                        Positioned(
-                                          left: 8,
-                                          right: 8,
-                                          bottom: 8,
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                                            decoration: BoxDecoration(
-                                              color: Colors.black.withOpacity(0.45),
-                                              borderRadius: BorderRadius.circular(12),
-                                              border: Border.all(color: Colors.white.withOpacity(0.10)),
+                                    return SizedBox(
+                                      width: slotW,
+                                      child: Stack(
+                                        children: [
+                                          Positioned.fill(
+                                            child: TarotCardTile(
+                                              width: slotW,
+                                              height: cardH,
+                                              card: card,
+                                              faceUp: _revealed && hasCard,
+                                              disabled: true,
+                                              selected: hasCard,
+                                              badgeLabel: "${i + 1}",
                                             ),
-                                            child: Text(
-                                              positions[i],
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              textAlign: TextAlign.center,
-                                              style: TextStyle(
-                                                color: Colors.white.withOpacity(0.85),
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.w800,
+                                          ),
+                                          Positioned(
+                                            left: 8,
+                                            right: 8,
+                                            bottom: 8,
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                              decoration: BoxDecoration(
+                                                color: Colors.black.withOpacity(0.45),
+                                                borderRadius: BorderRadius.circular(12),
+                                                border: Border.all(color: Colors.white.withOpacity(0.10)),
+                                              ),
+                                              child: Text(
+                                                positions[i],
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                textAlign: TextAlign.center,
+                                                style: TextStyle(
+                                                  color: Colors.white.withOpacity(0.85),
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w800,
+                                                ),
                                               ),
                                             ),
                                           ),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                },
+                                        ],
+                                      ),
+                                    );
+                                  },
+                                ),
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-
-            // deste yukarı
-            const SizedBox(height: 8),
-
-            /// ✅ DESTE ALANI: daha geniş ve yüksek alan (kırmızı)
-            Expanded(
-              child: GlassCard(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        "Deste (Kapalı Kartlar)",
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
-                      ),
-                      const SizedBox(height: 10),
-                      Expanded(
-                        child: LayoutBuilder(
-                          builder: (context, dc) {
-                            const gap = 12.0;
-                            const cardAspect = 0.70;
-
-                            final cols = _deckColsFor(dc.maxWidth);
-                            final tileW = (dc.maxWidth - gap * (cols - 1)) / cols;
-                            final tileH = tileW / cardAspect;
-
-                            final canPick = !_revealed && _picked.length < _need && !_loading;
-
-                            return GridView.builder(
-                              padding: EdgeInsets.zero,
-                              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: cols,
-                                crossAxisSpacing: gap,
-                                mainAxisSpacing: gap,
-                                childAspectRatio: cardAspect,
-                              ),
-                              itemCount: _pool.length,
-                              itemBuilder: (context, index) {
-                                final card = _pool[index];
-                                return TarotCardTile(
-                                  width: tileW,
-                                  height: tileH,
-                                  card: card,
-                                  faceUp: false,
-                                  disabled: !canPick,
-                                  onTap: canPick ? () => _pickFromPool(card) : null,
-                                );
-                              },
-                            );
-                          },
+                          ],
                         ),
                       ),
-                    ],
+                    ),
+                  );
+                },
+              ),
+
+              const SizedBox(height: 10),
+
+              /// ✅ DESTE
+              Expanded(
+                child: GlassCard(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          "Deste (Kapalı Kartlar)",
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                        ),
+                        const SizedBox(height: 10),
+                        Expanded(
+                          child: LayoutBuilder(
+                            builder: (context, dc) {
+                              const gap = 12.0;
+                              const cardAspect = 0.70;
+
+                              final cols = _deckColsFor(dc.maxWidth);
+                              final tileW = (dc.maxWidth - gap * (cols - 1)) / cols;
+                              final tileH = tileW / cardAspect;
+
+                              final canPick = !_revealed && _picked.length < _need && !_loading;
+
+                              return GridView.builder(
+                                padding: EdgeInsets.zero,
+                                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: cols,
+                                  crossAxisSpacing: gap,
+                                  mainAxisSpacing: gap,
+                                  childAspectRatio: cardAspect,
+                                ),
+                                itemCount: _pool.length,
+                                itemBuilder: (context, index) {
+                                  final card = _pool[index];
+                                  return TarotCardTile(
+                                    width: tileW,
+                                    height: tileH,
+                                    card: card,
+                                    faceUp: false,
+                                    disabled: !canPick,
+                                    onTap: canPick ? () => _pickFromPool(card) : null,
+                                  );
+                                },
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
 
-            const SizedBox(height: 12),
+              const SizedBox(height: 12),
 
-            Row(
-              children: [
-                Expanded(
-                  child: GradientButton(
-                    text: "Kartları Çevir",
-                    onPressed: (_picked.length == _need && !_revealed && !_loading) ? _reveal : null,
+              Row(
+                children: [
+                  Expanded(
+                    child: GradientButton(
+                      text: "Kartları Aç",
+                      onPressed: (_picked.length == _need && !_revealed && !_loading) ? _reveal : null,
+                    ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: GradientButton(
-                    text: _loading ? "Kaydediliyor..." : "Devam",
-                    onPressed: (_picked.length == _need && _revealed && !_loading) ? _saveAndGoPayment : null,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: GradientButton(
+                      text: _loading ? "Kaydediliyor..." : "Devam",
+                      onPressed: (_picked.length == _need && _revealed && !_loading) ? _saveAndGoPayment : null,
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ],
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

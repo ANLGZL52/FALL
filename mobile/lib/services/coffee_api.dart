@@ -63,7 +63,6 @@ class CoffeeApi {
   }
 
   /// ✅ ESKİ KODLAR BOZULMASIN diye ALIAS
-  /// coffee_screen.dart bazen imageFiles paramı ile çağırıyor.
   static Future<CoffeeReading> uploadPhotos({
     required String readingId,
     List<File>? files,
@@ -103,7 +102,6 @@ class CoffeeApi {
     required String readingId,
   }) async {
     final uri = Uri.parse('$_base/coffee/$readingId/generate');
-
     final res = await http.post(uri);
 
     if (res.statusCode != 200) {
@@ -113,11 +111,28 @@ class CoffeeApi {
     return CoffeeReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
+  /// ✅ FIX: Modelde olmayan alanlara (resultText/result/text) erişme!
+  /// CoffeeReading.fromJson zaten comment veya result_text'i `comment` alanına map ediyor.
+  static Future<String> generateText({
+    required String readingId,
+  }) async {
+    final CoffeeReading reading = await generate(readingId: readingId);
+
+    final String text = (reading.comment ?? '').trim();
+
+    if (text.isEmpty) {
+      throw Exception(
+        'generateText: comment is empty (backend should return comment or result_text)',
+      );
+    }
+
+    return text;
+  }
+
   static Future<CoffeeReading> detail({
     required String readingId,
   }) async {
     final uri = Uri.parse('$_base/coffee/$readingId');
-
     final res = await http.get(uri);
 
     if (res.statusCode != 200) {
