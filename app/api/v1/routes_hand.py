@@ -124,14 +124,34 @@ async def upload_images(
 
 @router.post("/{reading_id}/mark-paid", response_model=HandReading)
 async def mark_paid(reading_id: str, body: MarkPaidRequest, session: Session = Depends(get_session)):
+    """
+    ✅ Legacy/mock akış bozulmasın diye endpoint duruyor.
+    🔒 Ama güvenlik için sadece TEST-... (mock) ödeme referansı ile çalışır.
+    Store/IAP akışında paid işaretini /payments/verify server-side yapar.
+    """
     r = _get_or_404(session, reading_id)
 
     if not list_photos(r):
         raise HTTPException(status_code=400, detail="Ödeme için önce fotoğraf yüklemelisin.")
 
+    if not body.payment_ref:
+        raise HTTPException(status_code=422, detail="payment_ref is required")
+
+    # 🔒 Sadece legacy/mock izin
+    if not str(body.payment_ref).startswith("TEST-"):
+        raise HTTPException(
+            status_code=403,
+            detail="mark-paid is legacy only. Use /payments/verify for real payments.",
+        )
+
+    # idempotent
+    if r.is_paid and r.payment_ref:
+        return _to_schema(r)
+
     r.is_paid = True
     r.payment_ref = body.payment_ref
     r.status = "paid"
+    r.updated_at = datetime.utcnow()
     r = update_reading(session, r)
     return _to_schema(r)
 
@@ -187,5 +207,6 @@ async def rate(reading_id: str, req: RatingRequest, session: Session = Depends(g
     if req.rating < 1 or req.rating > 5:
         raise HTTPException(status_code=400, detail="Rating must be 1..5")
     r.rating = req.rating
+    r.updated_at = datetime.utcnow()
     r = update_reading(session, r)
     return _to_schema(r)

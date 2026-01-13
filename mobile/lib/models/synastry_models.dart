@@ -53,8 +53,8 @@ class SynastryStartResponse {
   const SynastryStartResponse({required this.readingId});
 
   factory SynastryStartResponse.fromJson(Map<String, dynamic> json) {
-    // backend create() reading obj döndürüyor olabilir: {"id": "..."} veya {"reading_id": "..."}
-    final id = (json["reading_id"] ?? json["id"] ?? "").toString();
+    // backend: {"id": "..."} veya {"reading_id": "..."} veya {"readingId": "..."}
+    final id = (json["reading_id"] ?? json["readingId"] ?? json["id"] ?? "").toString();
     return SynastryStartResponse(readingId: id);
   }
 }
@@ -71,7 +71,7 @@ class SynastryMarkPaidRequest {
 
 class SynastryStatusResponse {
   final String id;
-  final String status; // created|paid|processing|done|error (senin repo'ya göre)
+  final String status; // created|paid|processing|done|error
   final String? resultText;
   final String? error;
 
@@ -82,12 +82,43 @@ class SynastryStatusResponse {
     this.error,
   });
 
+  static String? _pickString(Map<String, dynamic> j, List<String> keys) {
+    for (final k in keys) {
+      final v = j[k];
+      if (v == null) continue;
+      final s = v.toString();
+      if (s.trim().isNotEmpty) return s;
+    }
+    return null;
+  }
+
   factory SynastryStatusResponse.fromJson(Map<String, dynamic> json) {
+    final id = (json["id"] ?? json["reading_id"] ?? json["readingId"] ?? "").toString();
+
+    // status bazen null/boş gelebiliyor: default "processing"
+    final statusRaw = (json["status"] ?? "").toString().trim();
+    final status = statusRaw.isEmpty ? "processing" : statusRaw;
+
+    // result_text en yaygını; ama fallback’ler ekledik
+    final resultText = _pickString(json, [
+      "result_text",
+      "resultText",
+      "result",
+      "output_text",
+    ]);
+
+    // error bazen detail/message
+    final error = _pickString(json, [
+      "error",
+      "detail",
+      "message",
+    ]);
+
     return SynastryStatusResponse(
-      id: (json["id"] ?? json["reading_id"] ?? "").toString(),
-      status: (json["status"] ?? "").toString(),
-      resultText: json["result_text"]?.toString(),
-      error: json["error"]?.toString(),
+      id: id,
+      status: status,
+      resultText: resultText,
+      error: error,
     );
   }
 }

@@ -14,7 +14,7 @@ from app.models.tarot_db import TarotReadingDB    # noqa: F401
 from app.models.numerology_db import NumerologyReadingDB  # noqa: F401
 from app.models.birthchart_db import BirthChartReadingDB  # noqa: F401
 from app.models.personality_db import PersonalityReadingDB  # noqa: F401
-from app.models.synastry_db import SynastryReadingDB  # noqa: F401  ✅ NEW
+from app.models.synastry_db import SynastryReadingDB  # noqa: F401
 
 
 engine = create_engine(
@@ -48,7 +48,7 @@ def init_db() -> None:
     ensure_numerology_schema()
     ensure_birthchart_schema()
     ensure_personality_schema()
-    ensure_synastry_schema()  # ✅ NEW
+    ensure_synastry_schema()
 
 
 # -------------------------
@@ -72,6 +72,17 @@ def _sqlite_has_column(table: str, column: str) -> bool:
         rows = conn.execute(q).fetchall()
     cols = {r[1] for r in rows}  # (cid, name, type, notnull, dflt_value, pk)
     return column in cols
+
+
+def _sqlite_add_cols(table: str, alters: list[str]) -> None:
+    if not alters:
+        print(f"[DB] {table} schema OK.")
+        return
+
+    with engine.begin() as conn:
+        for stmt in alters:
+            conn.execute(text(stmt))
+    print(f"[DB] {table} altered: {len(alters)} changes applied.")
 
 
 # -------------------------
@@ -102,13 +113,7 @@ def ensure_hand_schema() -> None:
     if not _sqlite_has_column(table, "created_at"):
         alters.append("ALTER TABLE hand_readings ADD COLUMN created_at DATETIME;")
 
-    if alters:
-        with engine.begin() as conn:
-            for stmt in alters:
-                conn.execute(text(stmt))
-        print(f"[DB] hand_readings altered: {len(alters)} changes applied.")
-    else:
-        print("[DB] hand_readings schema OK.")
+    _sqlite_add_cols(table, alters)
 
 
 # -------------------------
@@ -125,24 +130,41 @@ def ensure_tarot_schema() -> None:
 
     alters: list[str] = []
 
-    if not _sqlite_has_column(table, "payment_ref"):
-        alters.append("ALTER TABLE tarot_readings ADD COLUMN payment_ref VARCHAR;")
-    if not _sqlite_has_column(table, "rating"):
-        alters.append("ALTER TABLE tarot_readings ADD COLUMN rating INTEGER;")
+    # ✅ TarotReadingDB alanları (route'ların kullandığı her şey)
+    if not _sqlite_has_column(table, "name"):
+        alters.append("ALTER TABLE tarot_readings ADD COLUMN name VARCHAR;")
+    if not _sqlite_has_column(table, "age"):
+        alters.append("ALTER TABLE tarot_readings ADD COLUMN age INTEGER;")
+
+    if not _sqlite_has_column(table, "topic"):
+        alters.append("ALTER TABLE tarot_readings ADD COLUMN topic VARCHAR;")
+    if not _sqlite_has_column(table, "question"):
+        alters.append("ALTER TABLE tarot_readings ADD COLUMN question VARCHAR;")
+    if not _sqlite_has_column(table, "spread_type"):
+        alters.append("ALTER TABLE tarot_readings ADD COLUMN spread_type VARCHAR;")
+
     if not _sqlite_has_column(table, "cards_json"):
         alters.append("ALTER TABLE tarot_readings ADD COLUMN cards_json VARCHAR;")
+
+    if not _sqlite_has_column(table, "is_paid"):
+        alters.append("ALTER TABLE tarot_readings ADD COLUMN is_paid BOOLEAN;")
+    if not _sqlite_has_column(table, "payment_ref"):
+        alters.append("ALTER TABLE tarot_readings ADD COLUMN payment_ref VARCHAR;")
+
+    if not _sqlite_has_column(table, "status"):
+        alters.append("ALTER TABLE tarot_readings ADD COLUMN status VARCHAR;")
+
+    if not _sqlite_has_column(table, "result_text"):
+        alters.append("ALTER TABLE tarot_readings ADD COLUMN result_text VARCHAR;")
+    if not _sqlite_has_column(table, "rating"):
+        alters.append("ALTER TABLE tarot_readings ADD COLUMN rating INTEGER;")
+
     if not _sqlite_has_column(table, "updated_at"):
         alters.append("ALTER TABLE tarot_readings ADD COLUMN updated_at DATETIME;")
     if not _sqlite_has_column(table, "created_at"):
         alters.append("ALTER TABLE tarot_readings ADD COLUMN created_at DATETIME;")
 
-    if alters:
-        with engine.begin() as conn:
-            for stmt in alters:
-                conn.execute(text(stmt))
-        print(f"[DB] tarot_readings altered: {len(alters)} changes applied.")
-    else:
-        print("[DB] tarot_readings schema OK.")
+    _sqlite_add_cols(table, alters)
 
 
 # -------------------------
@@ -170,13 +192,7 @@ def ensure_numerology_schema() -> None:
     if not _sqlite_has_column(table, "created_at"):
         alters.append("ALTER TABLE numerology_readings ADD COLUMN created_at DATETIME;")
 
-    if alters:
-        with engine.begin() as conn:
-            for stmt in alters:
-                conn.execute(text(stmt))
-        print(f"[DB] numerology_readings altered: {len(alters)} changes applied.")
-    else:
-        print("[DB] numerology_readings schema OK.")
+    _sqlite_add_cols(table, alters)
 
 
 # -------------------------
@@ -211,13 +227,7 @@ def ensure_birthchart_schema() -> None:
     if not _sqlite_has_column(table, "created_at"):
         alters.append("ALTER TABLE birthchart_readings ADD COLUMN created_at DATETIME;")
 
-    if alters:
-        with engine.begin() as conn:
-            for stmt in alters:
-                conn.execute(text(stmt))
-        print(f"[DB] birthchart_readings altered: {len(alters)} changes applied.")
-    else:
-        print("[DB] birthchart_readings schema OK.")
+    _sqlite_add_cols(table, alters)
 
 
 # -------------------------
@@ -245,17 +255,11 @@ def ensure_personality_schema() -> None:
     if not _sqlite_has_column(table, "created_at"):
         alters.append("ALTER TABLE personality_readings ADD COLUMN created_at DATETIME;")
 
-    if alters:
-        with engine.begin() as conn:
-            for stmt in alters:
-                conn.execute(text(stmt))
-        print(f"[DB] personality_readings altered: {len(alters)} changes applied.")
-    else:
-        print("[DB] personality_readings schema OK.")
+    _sqlite_add_cols(table, alters)
 
 
 # -------------------------
-# ✅ SYNSTRY SCHEMA (SQLITE) ✅ NEW
+# SYNSTRY SCHEMA (SQLITE)
 # -------------------------
 
 def ensure_synastry_schema() -> None:
@@ -289,10 +293,4 @@ def ensure_synastry_schema() -> None:
             else:
                 alters.append(f"ALTER TABLE {table} ADD COLUMN {col} VARCHAR;")
 
-    if alters:
-        with engine.begin() as conn:
-            for stmt in alters:
-                conn.execute(text(stmt))
-        print(f"[DB] synastry_readings altered: {len(alters)} changes applied.")
-    else:
-        print("[DB] synastry_readings schema OK.")
+    _sqlite_add_cols(table, alters)

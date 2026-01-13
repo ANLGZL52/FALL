@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 
-import 'package:fall_app/widgets/mystic_scaffold.dart';
-import 'package:fall_app/features/numerology/numerology_form_screen.dart';
+import 'package:lunaura/widgets/mystic_scaffold.dart';
+import 'package:lunaura/features/numerology/numerology_form_screen.dart';
 
 class NumerologyIntroScreen extends StatelessWidget {
   const NumerologyIntroScreen({super.key});
 
   void _goForm(BuildContext context) {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const NumerologyFormScreen()),
+      MaterialPageRoute(builder: (_) => NumerologyFormScreen()),
     );
   }
 

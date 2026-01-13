@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:fall_app/widgets/mystic_scaffold.dart';
-import 'package:fall_app/services/personality_api.dart';
+import 'package:lunaura/widgets/mystic_scaffold.dart';
+import 'package:lunaura/services/personality_api.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:open_filex/open_filex.dart';
 

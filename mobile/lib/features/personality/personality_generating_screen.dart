@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:fall_app/widgets/mystic_scaffold.dart';
-import 'package:fall_app/services/personality_api.dart';
+
+import 'package:lunaura/widgets/mystic_scaffold.dart';
+import 'package:lunaura/services/personality_api.dart';
+import 'package:lunaura/services/device_id_service.dart';
 import 'personality_result_screen.dart';
 
 class PersonalityGeneratingScreen extends StatefulWidget {
@@ -31,7 +33,12 @@ class _PersonalityGeneratingScreenState extends State<PersonalityGeneratingScree
 
   Future<void> _run() async {
     try {
-      final generated = await PersonalityApi.generate(readingId: widget.readingId);
+      final deviceId = await DeviceIdService.getOrCreate();
+
+      final generated = await PersonalityApi.generate(
+        readingId: widget.readingId,
+        deviceId: deviceId,
+      );
 
       if (!mounted) return;
 
@@ -49,7 +56,7 @@ class _PersonalityGeneratingScreenState extends State<PersonalityGeneratingScree
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Hata: $e"), behavior: SnackBarBehavior.floating),
       );
-      Navigator.of(context).pop(); // Onay ekranına geri
+      Navigator.of(context).pop();
     }
   }
 
@@ -64,7 +71,7 @@ class _PersonalityGeneratingScreenState extends State<PersonalityGeneratingScree
             const SizedBox(height: 10),
             Row(
               children: const [
-                SizedBox(width: 52), // back yok: kullanıcı burada geri/ileriyle oynamasın
+                SizedBox(width: 52),
                 Expanded(
                   child: Text(
                     "Kişilik Analizi",
@@ -103,7 +110,7 @@ class _PersonalityGeneratingScreenState extends State<PersonalityGeneratingScree
                         const SizedBox(height: 8),
                         Text(
                           "Bu işlem birkaç saniye sürebilir. Lütfen ekranı kapatma.",
-                          style: TextStyle(color: Colors.white.withOpacity(0.72), height: 1.25),
+                          style: TextStyle(color: Colors.white70, height: 1.25),
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 18),
@@ -138,7 +145,7 @@ class _PersonalityGeneratingScreenState extends State<PersonalityGeneratingScree
           Expanded(
             child: Text(
               t,
-              style: TextStyle(color: Colors.white.withOpacity(0.70), fontSize: 12, height: 1.25),
+              style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.25),
             ),
           ),
         ],

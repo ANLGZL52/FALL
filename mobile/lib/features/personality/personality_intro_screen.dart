@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:fall_app/widgets/mystic_scaffold.dart';
+import 'package:lunaura/widgets/mystic_scaffold.dart';
 import 'personality_form_screen.dart';
 
 class PersonalityIntroScreen extends StatelessWidget {

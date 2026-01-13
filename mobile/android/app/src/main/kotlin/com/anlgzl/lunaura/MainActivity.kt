@@ -1,4 +1,4 @@
-package com.example.fall_app
+package com.anlgzl.lunaura
 
 import io.flutter.embedding.android.FlutterActivity
 

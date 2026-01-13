@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 
-import 'package:fall_app/widgets/mystic_scaffold.dart';
-import 'package:fall_app/services/numerology_api.dart';
-import 'package:fall_app/features/numerology/numerology_result_screen.dart';
+import 'package:lunaura/widgets/mystic_scaffold.dart';
+import 'package:lunaura/services/device_id_service.dart';
+import 'package:lunaura/services/numerology_api.dart';
+import 'package:lunaura/features/numerology/numerology_result_screen.dart';
 
 class NumerologyLoadingScreen extends StatefulWidget {
   final String readingId;
@@ -29,7 +30,6 @@ class _NumerologyLoadingScreenState extends State<NumerologyLoadingScreen> {
 
   Future<void> _run() async {
     try {
-      // küçük UX: ekranda “yaşıyor” hissi
       Future.delayed(const Duration(milliseconds: 600), () {
         if (mounted) setState(() => _hint = "Sayıların dili çözülüyor…");
       });
@@ -37,7 +37,12 @@ class _NumerologyLoadingScreenState extends State<NumerologyLoadingScreen> {
         if (mounted) setState(() => _hint = "Temalar ve dönem enerjileri birleştiriliyor…");
       });
 
-      final generated = await NumerologyApi.generate(readingId: widget.readingId);
+      final deviceId = await DeviceIdService.getOrCreate();
+
+      final generated = await NumerologyApi.generate(
+        readingId: widget.readingId,
+        deviceId: deviceId,
+      );
 
       if (!mounted) return;
       Navigator.of(context).pushReplacement(

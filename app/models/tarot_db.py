@@ -21,7 +21,7 @@ class TarotReadingDB(SQLModel, table=True):
     topic: str = Field(default="", max_length=120)
     question: str = Field(default="", max_length=500)
 
-    # ✅ three/six/twelve (senin Flutter ile uyumlu)
+    # ✅ three/six/twelve (Flutter ile uyumlu)
     spread_type: str = Field(default="three", max_length=20)
 
     # ✅ kartlar json string olarak tutulur
@@ -29,13 +29,16 @@ class TarotReadingDB(SQLModel, table=True):
 
     # ödeme + durum
     is_paid: bool = Field(default=False)
-    payment_ref: Optional[str] = Field(default=None)   # ✅ route kullanıyor
-    status: str = Field(default="started", max_length=20)  # started/selected/processing/completed
+    payment_ref: Optional[str] = Field(default=None)
+
+    # ✅ default'u start route ile aynı: ödeme bekliyor
+    # pending_payment/selected/paid/processing/completed
+    status: str = Field(default="pending_payment", max_length=30)
 
     # çıktı
     result_text: Optional[str] = Field(default=None)
 
-    # ✅ puan (route kullanıyor)
+    # puan
     rating: Optional[int] = Field(default=None)
 
     created_at: datetime = Field(default_factory=datetime.utcnow)

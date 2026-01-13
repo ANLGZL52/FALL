@@ -2,6 +2,20 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
+import 'api_base.dart';
+
+String _extractErrorMessage(String body) {
+  try {
+    final decoded = jsonDecode(body);
+    if (decoded is Map<String, dynamic>) {
+      final detail = decoded['detail'];
+      if (detail is String && detail.trim().isNotEmpty) return detail;
+      return decoded.toString();
+    }
+  } catch (_) {}
+  return body;
+}
+
 class PersonalityReading {
   final String id;
   final String name;
@@ -53,24 +67,21 @@ class PersonalityReading {
 }
 
 class PersonalityApi {
-  /// Windows Desktop: 127.0.0.1 çalışır
-  /// Android Emulator: 10.0.2.2
-  /// Gerçek telefon: PC LAN IP (örn 192.168.1.xx)
-  static const String baseUrl = "http://127.0.0.1:8001/api/v1";
+  static Uri _u(String path) => Uri.parse('${ApiBase.baseUrl}$path');
 
   static Future<PersonalityReading> start({
     required String name,
     required String birthDate, // YYYY-MM-DD
-    String? birthTime, // HH:MM (opsiyonel)
+    String? birthTime, // HH:MM
     required String birthCity,
     String birthCountry = "TR",
     String topic = "genel",
     String? question,
+    String? deviceId,
   }) async {
-    final uri = Uri.parse("$baseUrl/personality/start");
     final res = await http.post(
-      uri,
-      headers: {"Content-Type": "application/json"},
+      _u('/personality/start'),
+      headers: ApiBase.headers(deviceId: deviceId),
       body: jsonEncode({
         "name": name,
         "birth_date": birthDate,
@@ -82,51 +93,66 @@ class PersonalityApi {
       }),
     );
 
-    if (res.statusCode != 200) {
-      throw Exception("personality start failed: ${res.statusCode} ${res.body}");
+    if (res.statusCode >= 400) {
+      throw Exception('personality start failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
     }
+
     return PersonalityReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
-  /// Ödeme UI yok; backend auto-paid yapsa bile bazı kurulumlarda hâlâ kullanılabilir.
+  /// ✅ LEGACY only (bozulmasın diye kalsın)
   static Future<PersonalityReading> markPaid({
     required String readingId,
     String? paymentRef,
+    String? deviceId,
   }) async {
-    final uri = Uri.parse("$baseUrl/personality/$readingId/mark-paid");
+    final ref = (paymentRef ?? '').trim();
+    if (ref.isNotEmpty && !ref.startsWith("TEST-")) {
+      throw Exception("markPaid legacy only. Real payments use /payments/verify.");
+    }
+
     final res = await http.post(
-      uri,
-      headers: {"Content-Type": "application/json"},
+      _u('/personality/$readingId/mark-paid'),
+      headers: ApiBase.headers(deviceId: deviceId),
       body: jsonEncode({"payment_ref": paymentRef}),
     );
 
-    if (res.statusCode != 200) {
-      throw Exception("personality mark-paid failed: ${res.statusCode} ${res.body}");
+    if (res.statusCode >= 400) {
+      throw Exception('personality mark-paid failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
     }
+
     return PersonalityReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
   static Future<PersonalityReading> generate({
     required String readingId,
+    String? deviceId,
   }) async {
-    final uri = Uri.parse("$baseUrl/personality/$readingId/generate");
-    final res = await http.post(uri);
+    final res = await http.post(
+      _u('/personality/$readingId/generate'),
+      headers: ApiBase.headers(deviceId: deviceId),
+    );
 
-    if (res.statusCode != 200) {
-      throw Exception("personality generate failed: ${res.statusCode} ${res.body}");
+    if (res.statusCode >= 400) {
+      throw Exception('personality generate failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
     }
+
     return PersonalityReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
   static Future<Uint8List> downloadPdfBytes({
     required String readingId,
+    String? deviceId,
   }) async {
-    final uri = Uri.parse("$baseUrl/personality/$readingId/pdf");
-    final res = await http.get(uri);
+    final res = await http.get(
+      _u('/personality/$readingId/pdf'),
+      headers: ApiBase.headers(deviceId: deviceId),
+    );
 
-    if (res.statusCode != 200) {
-      throw Exception("personality pdf failed: ${res.statusCode} ${res.body}");
+    if (res.statusCode >= 400) {
+      throw Exception('personality pdf failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
     }
+
     return res.bodyBytes;
   }
 }

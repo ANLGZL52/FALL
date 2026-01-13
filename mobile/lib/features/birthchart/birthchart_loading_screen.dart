@@ -1,10 +1,52 @@
-// mobile/lib/features/birthchart/birthchart_loading_screen.dart
 import 'package:flutter/material.dart';
-import '../../widgets/mystic_scaffold.dart';
 
-class BirthChartLoadingScreen extends StatelessWidget {
+import '../../services/birthchart_api.dart';
+import '../../services/device_id_service.dart';
+import '../../widgets/mystic_scaffold.dart';
+import 'birthchart_result_screen.dart';
+
+class BirthChartLoadingScreen extends StatefulWidget {
+  final String readingId;
   final String title;
-  const BirthChartLoadingScreen({super.key, this.title = "Doğum haritan hazırlanıyor..."});
+
+  const BirthChartLoadingScreen({
+    super.key,
+    required this.readingId,
+    this.title = "Doğum haritan hazırlanıyor...",
+  });
+
+  @override
+  State<BirthChartLoadingScreen> createState() => _BirthChartLoadingScreenState();
+}
+
+class _BirthChartLoadingScreenState extends State<BirthChartLoadingScreen> {
+  @override
+  void initState() {
+    super.initState();
+    _run();
+  }
+
+  Future<void> _run() async {
+    try {
+      final deviceId = await DeviceIdService.getOrCreate();
+
+      final reading = await BirthChartApi.generate(
+        readingId: widget.readingId,
+        deviceId: deviceId,
+      );
+
+      if (!mounted) return;
+
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => BirthChartResultScreen(reading: reading)),
+        (route) => false,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Hata: $e")));
+      Navigator.of(context).pop();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -40,7 +82,10 @@ class BirthChartLoadingScreen extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w900)),
+                    Text(
+                      widget.title,
+                      style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w900),
+                    ),
                     const SizedBox(height: 10),
                     Text(
                       "Semboller ve temalar birleştiriliyor…\n"

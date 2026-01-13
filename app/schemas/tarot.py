@@ -4,18 +4,23 @@ from datetime import datetime
 from typing import Optional, List
 from pydantic import BaseModel, Field
 
+
 class TarotMarkPaidRequest(BaseModel):
+    # ödeme referansı mock da olsa boş gelmesin
     payment_ref: Optional[str] = None
+
 
 class TarotStartRequest(BaseModel):
     topic: str = Field(default="", max_length=120)
     question: str = Field(default="", max_length=500)
     name: str = Field(default="Misafir", max_length=80)
     age: Optional[int] = None
-    spread_type: str = Field(default="three")  # three / six / twelve
+    # three / six / twelve
+    spread_type: str = Field(default="three", max_length=20)
 
 
 class TarotSelectCardsRequest(BaseModel):
+    # ör: ["major_18_moon|R", "major_00_fool|U", ...]
     cards: List[str]
 
 

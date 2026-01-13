@@ -49,10 +49,26 @@ def mark_paid(
     payload: PersonalityMarkPaidRequest | None = None,
     session: Session = Depends(get_session),
 ):
+    """
+    ✅ Legacy/mock akış bozulmasın diye endpoint duruyor.
+    🔒 Ama güvenlik için sadece TEST-... (mock) ödeme ref ile çalışır.
+    Real ödeme: /payments/verify server-side mark_paid yapar.
+    """
+    payment_ref = payload.payment_ref if payload else None
+
+    if not payment_ref:
+        raise HTTPException(status_code=422, detail="payment_ref is required")
+
+    if not str(payment_ref).startswith("TEST-"):
+        raise HTTPException(
+            status_code=403,
+            detail="mark-paid is legacy only. Use /payments/verify for real payments.",
+        )
+
     reading = personality_repo.mark_paid(
         session=session,
         reading_id=reading_id,
-        payment_ref=payload.payment_ref if payload else None,
+        payment_ref=payment_ref,
     )
     if not reading:
         raise HTTPException(status_code=404, detail="Reading not found")

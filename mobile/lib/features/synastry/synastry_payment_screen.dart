@@ -1,7 +1,10 @@
-// lib/features/synastry/synastry_payment_screen.dart
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import '../../services/synastry_api.dart';
+import '../../services/device_id_service.dart';
+import '../../services/iap_service.dart';
+import '../../services/payment_api.dart';
+import '../../widgets/mystic_scaffold.dart';
 import 'synastry_generating_screen.dart';
 
 class SynastryPaymentScreen extends StatefulWidget {
@@ -19,36 +22,100 @@ class SynastryPaymentScreen extends StatefulWidget {
 }
 
 class _SynastryPaymentScreenState extends State<SynastryPaymentScreen> {
-  final _api = SynastryApi();
-  final _paymentRef = TextEditingController(text: 'demo-payment');
-
   bool _loading = false;
+  String? _lastPaymentId;
 
-  @override
-  void dispose() {
-    _paymentRef.dispose();
-    super.dispose();
+  static const String _sku = "fall_synastry_149";
+  static const bool debugUseStoreIap = false;
+
+  Future<PaymentVerifyResult> _debugStubVerify({
+    required String deviceId,
+    required String readingId,
+    required String sku,
+  }) async {
+    final intent = await PurchaseApi.createIntent(
+      deviceId: deviceId,
+      readingId: readingId,
+      sku: sku,
+    );
+    _lastPaymentId = intent.paymentId;
+
+    final String platform =
+        defaultTargetPlatform == TargetPlatform.iOS ? "app_store" : "google_play";
+    final String transactionId = "TXN-DEV-${DateTime.now().millisecondsSinceEpoch}";
+
+    String? purchaseToken;
+    String? receiptData;
+
+    if (platform == "google_play") {
+      purchaseToken = "DEV_TOKEN_123456";
+    } else {
+      receiptData = "DEV_RECEIPT_DATA_ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    }
+
+    return PurchaseApi.verify(
+      deviceId: deviceId,
+      paymentId: intent.paymentId,
+      sku: sku,
+      platform: platform,
+      transactionId: transactionId,
+      purchaseToken: purchaseToken,
+      receiptData: receiptData,
+    );
   }
 
-  Future<void> _confirmPaidAndGenerate() async {
+  Future<void> _goGenerating() async {
+    if (!mounted) return;
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SynastryGeneratingScreen(readingId: widget.readingId),
+      ),
+    );
+  }
+
+  Future<void> _payAndStart() async {
+    if (_loading) return;
     setState(() => _loading = true);
+
     try {
-      // 1) mark paid
-      await _api.markPaid(widget.readingId, paymentRef: _paymentRef.text.trim());
+      final deviceId = await DeviceIdService.getOrCreate();
 
-      // 2) generate
-      await _api.generate(widget.readingId);
+      late final PaymentVerifyResult verify;
 
-      if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => SynastryGeneratingScreen(readingId: widget.readingId),
-        ),
-      );
+      if (kReleaseMode) {
+        verify = await IapService.instance.buyAndVerify(
+          readingId: widget.readingId,
+          sku: _sku,
+        );
+      } else {
+        if (debugUseStoreIap) {
+          verify = await IapService.instance.buyAndVerify(
+            readingId: widget.readingId,
+            sku: _sku,
+          );
+        } else {
+          verify = await _debugStubVerify(
+            deviceId: deviceId,
+            readingId: widget.readingId,
+            sku: _sku,
+          );
+        }
+      }
+
+      _lastPaymentId = verify.paymentId;
+
+      if (!verify.verified) {
+        throw Exception("Ödeme doğrulanamadı: ${verify.status}");
+      }
+
+      // ✅ verify sonrası backend synastry reading'i paid yaptı
+      await _goGenerating();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ödeme/Üretim hatası: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Ödeme/Üretim hatası: $e")),
+      );
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -56,58 +123,62 @@ class _SynastryPaymentScreenState extends State<SynastryPaymentScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return MysticScaffold(
+      scrimOpacity: 0.62,
+      patternOpacity: 0.22,
       appBar: AppBar(
         title: Text(widget.title),
-        backgroundColor: Colors.black,
       ),
-      backgroundColor: Colors.black,
-      body: AbsorbPointer(
-        absorbing: _loading,
+      body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const SizedBox(height: 10),
-              const Text(
-                'Demo ödeme ekranı.\nGerçekte burada Stripe/Iyzico entegre edeceğiz.',
-                style: TextStyle(color: Colors.white70, height: 1.3),
-              ),
-              const SizedBox(height: 16),
-
-              TextField(
-                controller: _paymentRef,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  labelText: 'payment_ref (demo)',
-                  labelStyle: const TextStyle(color: Colors.white70),
-                  filled: true,
-                  fillColor: const Color(0xFF0B1120).withOpacity(0.75),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide: const BorderSide(color: Colors.white12),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide: const BorderSide(color: Color(0xFFD6B15E)),
-                  ),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.45),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "Sinastri (Uyum Analizi)",
+                      style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900),
+                    ),
+                    const SizedBox(height: 10),
+                    const Text(
+                      "Ödeme doğrulandıktan sonra analiz üretimine geçilir.",
+                      style: TextStyle(color: Colors.white70, height: 1.25),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text("Tutar: 149 ₺", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
+                    const SizedBox(height: 6),
+                    Text("SKU: $_sku", style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                    if (_lastPaymentId != null) ...[
+                      const SizedBox(height: 6),
+                      Text("Son işlem: $_lastPaymentId", style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                    ],
+                  ],
                 ),
               ),
-
               const Spacer(),
-
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFD6B15E),
-                  foregroundColor: Colors.black,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              SizedBox(
+                height: 56,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFF5C361),
+                    foregroundColor: Colors.black,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  onPressed: _loading ? null : _payAndStart,
+                  child: _loading
+                      ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Text("Öde → Analizi Başlat", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
                 ),
-                onPressed: _confirmPaidAndGenerate,
-                child: _loading
-                    ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Text('Ödedim → Analizi Başlat'),
               ),
             ],
           ),

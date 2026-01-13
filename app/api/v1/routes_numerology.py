@@ -75,7 +75,20 @@ def get_reading(reading_id: str, db: Session = Depends(get_db)):
 
 @router.post("/{reading_id}/mark-paid", response_model=NumerologyReadingOut)
 def mark_paid(reading_id: str, payload: MarkPaidIn, db: Session = Depends(get_db)):
-    # Şimdilik kullanılmıyor ama endpoint dursun
+    """
+    ✅ Legacy/mock akış bozulmasın diye endpoint duruyor.
+    🔒 Ama güvenlik için sadece TEST-... (mock) ödeme referansı ile çalışır.
+    Store/IAP akışında paid işaretini /payments/verify server-side yapar.
+    """
+    if not payload.payment_ref:
+        raise HTTPException(status_code=422, detail="payment_ref is required")
+
+    if not str(payload.payment_ref).startswith("TEST-"):
+        raise HTTPException(
+            status_code=403,
+            detail="mark-paid is legacy only. Use /payments/verify for real payments.",
+        )
+
     obj = _repo.mark_paid(session=db, reading_id=reading_id, payment_ref=payload.payment_ref)
     if not obj:
         raise HTTPException(status_code=404, detail="Numerology kaydı bulunamadı (mark-paid).")
@@ -88,9 +101,9 @@ def generate(reading_id: str, db: Session = Depends(get_db)):
     if not obj:
         raise HTTPException(status_code=404, detail="Numerology kaydı bulunamadı (generate).")
 
-    # ✅ Ödeme zorunluluğu kaldırıldı (mock/şimdilik ödeme yok akışı)
-    # if not obj.get("is_paid", False):
-    #     raise HTTPException(status_code=402, detail="Ödeme yapılmadan AI yorumu üretilemez.")
+    # ✅ Ödeme zorunlu (artık store akışına bağlandı)
+    if not bool(obj.get("is_paid", False)):
+        raise HTTPException(status_code=400, detail="Payment required before reading")
 
     if (obj.get("result_text") or "").strip():
         return obj

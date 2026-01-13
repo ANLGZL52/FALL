@@ -1,6 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:fall_app/widgets/mystic_scaffold.dart';
-import 'package:fall_app/services/personality_api.dart';
+
+import '../../services/device_id_service.dart';
+import '../../services/iap_service.dart';
+import '../../services/payment_api.dart';
+import '../../widgets/mystic_scaffold.dart';
 import 'personality_generating_screen.dart';
 
 class PersonalityPaymentScreen extends StatefulWidget {
@@ -29,30 +33,100 @@ class PersonalityPaymentScreen extends StatefulWidget {
 
 class _PersonalityPaymentScreenState extends State<PersonalityPaymentScreen> {
   bool _loading = false;
+  String? _lastPaymentId;
 
-  Future<void> _confirmAndContinue() async {
-    setState(() => _loading = true);
-    try {
-      // UI’da MOCK yazmıyoruz ama backend akışı bozulmasın diye işaretliyoruz.
-      await PersonalityApi.markPaid(
-        readingId: widget.readingId,
-        paymentRef: "ref_${DateTime.now().millisecondsSinceEpoch}",
-      );
+  static const String _sku = "fall_personality_399";
+  static const bool debugUseStoreIap = false;
 
-      if (!mounted) return;
+  Future<PaymentVerifyResult> _debugStubVerify({
+    required String deviceId,
+    required String readingId,
+    required String sku,
+  }) async {
+    final intent = await PurchaseApi.createIntent(
+      deviceId: deviceId,
+      readingId: readingId,
+      sku: sku,
+    );
+    _lastPaymentId = intent.paymentId;
 
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => PersonalityGeneratingScreen(
-            readingId: widget.readingId,
-            name: widget.name,
-          ),
+    final String platform =
+        defaultTargetPlatform == TargetPlatform.iOS ? "app_store" : "google_play";
+    final String transactionId = "TXN-DEV-${DateTime.now().millisecondsSinceEpoch}";
+
+    String? purchaseToken;
+    String? receiptData;
+
+    if (platform == "google_play") {
+      purchaseToken = "DEV_TOKEN_123456";
+    } else {
+      receiptData = "DEV_RECEIPT_DATA_ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    }
+
+    return PurchaseApi.verify(
+      deviceId: deviceId,
+      paymentId: intent.paymentId,
+      sku: sku,
+      platform: platform,
+      transactionId: transactionId,
+      purchaseToken: purchaseToken,
+      receiptData: receiptData,
+    );
+  }
+
+  Future<void> _goGenerating() async {
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => PersonalityGeneratingScreen(
+          readingId: widget.readingId,
+          name: widget.name,
         ),
-      );
+      ),
+    );
+  }
+
+  Future<void> _payAndContinue() async {
+    if (_loading) return;
+    setState(() => _loading = true);
+
+    try {
+      final deviceId = await DeviceIdService.getOrCreate();
+
+      late final PaymentVerifyResult verify;
+
+      if (kReleaseMode) {
+        verify = await IapService.instance.buyAndVerify(
+          readingId: widget.readingId,
+          sku: _sku,
+        );
+      } else {
+        if (debugUseStoreIap) {
+          verify = await IapService.instance.buyAndVerify(
+            readingId: widget.readingId,
+            sku: _sku,
+          );
+        } else {
+          verify = await _debugStubVerify(
+            deviceId: deviceId,
+            readingId: widget.readingId,
+            sku: _sku,
+          );
+        }
+      }
+
+      _lastPaymentId = verify.paymentId;
+
+      if (!verify.verified) {
+        throw Exception("Ödeme doğrulanamadı: ${verify.status}");
+      }
+
+      // ✅ verify sonrası backend reading'i paid yaptı -> generate serbest
+      await _goGenerating();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Hata: $e"), behavior: SnackBarBehavior.floating),
+        SnackBar(content: Text("Ödeme hatası: $e"), behavior: SnackBarBehavior.floating),
       );
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -71,7 +145,7 @@ class _PersonalityPaymentScreenState extends State<PersonalityPaymentScreen> {
             Row(
               children: [
                 IconButton(
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: _loading ? null : () => Navigator.pop(context),
                   icon: const Icon(Icons.arrow_back, color: Colors.white),
                 ),
                 const Expanded(
@@ -84,7 +158,6 @@ class _PersonalityPaymentScreenState extends State<PersonalityPaymentScreen> {
               ],
             ),
             const SizedBox(height: 10),
-
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 18),
               child: Container(
@@ -107,14 +180,19 @@ class _PersonalityPaymentScreenState extends State<PersonalityPaymentScreen> {
                     _row("Saat", widget.birthTime.isEmpty ? "—" : widget.birthTime),
                     _row("Yer", "${widget.birthCity}, ${widget.birthCountry}"),
                     _row("Not", widget.question.isEmpty ? "—" : widget.question),
+                    const SizedBox(height: 10),
+                    const Text("Tutar: 399 ₺", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
                     const SizedBox(height: 6),
+                    Text("SKU: $_sku", style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                    if (_lastPaymentId != null) ...[
+                      const SizedBox(height: 6),
+                      Text("Son işlem: $_lastPaymentId", style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                    ],
                   ],
                 ),
               ),
             ),
-
             const Spacer(),
-
             Padding(
               padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
               child: SizedBox(
@@ -126,10 +204,10 @@ class _PersonalityPaymentScreenState extends State<PersonalityPaymentScreen> {
                     foregroundColor: Colors.black,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   ),
-                  onPressed: _loading ? null : _confirmAndContinue,
+                  onPressed: _loading ? null : _payAndContinue,
                   child: _loading
                       ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text("Devam", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
+                      : const Text("Öde → Analizi Başlat", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
                 ),
               ),
             ),
@@ -150,12 +228,7 @@ class _PersonalityPaymentScreenState extends State<PersonalityPaymentScreen> {
             child: Text(k, style: TextStyle(color: Colors.white.withOpacity(0.70), fontSize: 12)),
           ),
           const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              v,
-              style: const TextStyle(color: Colors.white, height: 1.25),
-            ),
-          ),
+          Expanded(child: Text(v, style: const TextStyle(color: Colors.white, height: 1.25))),
         ],
       ),
     );

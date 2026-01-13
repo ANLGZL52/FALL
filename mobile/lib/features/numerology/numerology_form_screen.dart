@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import 'package:fall_app/widgets/mystic_scaffold.dart';
-import 'package:fall_app/services/numerology_api.dart';
-import 'package:fall_app/features/numerology/numerology_loading_screen.dart';
+import 'package:lunaura/widgets/mystic_scaffold.dart';
+import 'package:lunaura/services/numerology_api.dart';
+import 'package:lunaura/features/numerology/numerology_loading_screen.dart';
 
 class NumerologyFormScreen extends StatefulWidget {
   const NumerologyFormScreen({super.key});

@@ -20,8 +20,8 @@ class TarotResultScreen extends StatelessWidget {
   });
 
   void _goHome(BuildContext context) {
-    // ✅ En güvenlisi: stack’i temizleyip ilk sayfaya dön
-    Navigator.of(context).popUntil((route) => route.isFirst);
+    // ✅ kesin home (stack temiz)
+    Navigator.of(context).pushNamedAndRemoveUntil('/home', (r) => false);
   }
 
   @override
@@ -29,7 +29,7 @@ class TarotResultScreen extends StatelessWidget {
     final positions = spreadType.positionsTr;
 
     return PopScope(
-      canPop: false, // ✅ geri kapalı
+      canPop: false,
       onPopInvoked: (didPop) {
         if (!didPop) _goHome(context);
       },
@@ -38,7 +38,7 @@ class TarotResultScreen extends StatelessWidget {
         patternOpacity: 0.18,
         appBar: AppBar(
           title: Text(spreadType.title),
-          automaticallyImplyLeading: false, // ✅ geri ok kalkar
+          automaticallyImplyLeading: false,
         ),
         body: Padding(
           padding: const EdgeInsets.all(16),
@@ -55,6 +55,8 @@ class TarotResultScreen extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 12),
+
+                    /// ✅ Kartlar: okunabilir olsun diye açılır-kapanır
                     GlassCard(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -67,17 +69,51 @@ class TarotResultScreen extends StatelessWidget {
                           ...selectedCards.asMap().entries.map((e) {
                             final i = e.key;
                             final c = e.value;
-                            final pos = positions[i];
+
+                            // ✅ crash-proof
+                            final pos = (i < positions.length)
+                                ? positions[i]
+                                : 'Pozisyon ${i + 1}';
+
                             final rev = c.isReversed ? ' (ters)' : '';
+
                             return Padding(
-                              padding: const EdgeInsets.only(bottom: 10),
-                              child: Text(
-                                '${i + 1}) $pos → ${c.nameTr} (${c.nameEn})$rev\n'
-                                '• ${c.shortMeaningTr}\n'
-                                '• Anahtarlar: ${c.keywordsTr.take(3).join(", ")}',
-                                style: TextStyle(
-                                  color: Colors.white.withOpacity(0.88),
-                                  height: 1.28,
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: Theme(
+                                data: Theme.of(context).copyWith(
+                                  dividerColor: Colors.transparent,
+                                ),
+                                child: ExpansionTile(
+                                  tilePadding: EdgeInsets.zero,
+                                  collapsedIconColor: Colors.white70,
+                                  iconColor: Colors.white70,
+                                  title: Text(
+                                    '${i + 1}) $pos → ${c.nameTr}$rev',
+                                    style: TextStyle(
+                                      color: Colors.white.withOpacity(0.92),
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    '${c.nameEn}',
+                                    style: TextStyle(color: Colors.white.withOpacity(0.70)),
+                                  ),
+                                  children: [
+                                    Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: Padding(
+                                        padding: const EdgeInsets.only(bottom: 8),
+                                        child: Text(
+                                          '• ${c.shortMeaningTr}\n'
+                                          '• Anahtarlar: ${c.keywordsTr.take(3).join(", ")}',
+                                          style: TextStyle(
+                                            color: Colors.white.withOpacity(0.88),
+                                            height: 1.28,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             );
@@ -85,14 +121,19 @@ class TarotResultScreen extends StatelessWidget {
                         ],
                       ),
                     ),
+
                     const SizedBox(height: 12),
+
                     GlassCard(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('Yorum', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
+                          const Text(
+                            'Yorum',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                          ),
                           const SizedBox(height: 10),
-                          Text(
+                          SelectableText(
                             resultText,
                             style: TextStyle(
                               color: Colors.white.withOpacity(0.88),

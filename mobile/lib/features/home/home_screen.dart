@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/app_colors.dart';
@@ -17,6 +18,9 @@ import '../personality/personality_intro_screen.dart';
 
 // ✅ Sinastri
 import '../synastry/synastry_intro_screen.dart';
+
+// ✅ IAP Debug
+import '../iap/iap_debug_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -49,6 +53,10 @@ class HomeScreen extends StatelessWidget {
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SynastryIntroScreen()));
   }
 
+  void _openIapDebug(BuildContext context) {
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const IapDebugScreen()));
+  }
+
   @override
   Widget build(BuildContext context) {
     return MysticScaffold(
@@ -63,7 +71,7 @@ class HomeScreen extends StatelessWidget {
                 // ❗ const LIST KULLANMIYORUZ (Windows "Not a constant expression" fix)
                 children: [
                   const Text(
-                    'MysticAura',
+                    'LunaAura',
                     style: TextStyle(
                       fontSize: 34,
                       fontWeight: FontWeight.w900,
@@ -89,6 +97,17 @@ class HomeScreen extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: ListView(
                   children: [
+                    // ✅ Debug’da IAP kartı
+                    if (!kReleaseMode) ...[
+                      FeatureCard(
+                        title: 'IAP Debug',
+                        subtitle: 'Ürünleri gör, satın alma/verify test et (debug only).',
+                        icon: Icons.bug_report_outlined,
+                        onTap: () => _openIapDebug(context),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+
                     FeatureCard(
                       title: 'Kahve Falı',
                       subtitle: 'Fotoğraf yükle, detaylı fal yorumunu al.',

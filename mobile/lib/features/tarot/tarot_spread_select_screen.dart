@@ -20,11 +20,11 @@ class _TarotSpreadSelectScreenState extends State<TarotSpreadSelectScreen> {
   TarotSpreadType _type = TarotSpreadType.three;
   bool _loading = false;
 
-  // ✅ Fiyatlar (TL)
+  // ✅ Yeni fiyatlar (TL) — senin son planın
   static const Map<TarotSpreadType, double> _prices = {
-    TarotSpreadType.three: 49.9,
-    TarotSpreadType.six: 79.9,
-    TarotSpreadType.twelve: 119.9,
+    TarotSpreadType.three: 149.0,
+    TarotSpreadType.six: 199.0,
+    TarotSpreadType.twelve: 250.0,
   };
 
   String _spreadToApi(TarotSpreadType t) {
@@ -67,7 +67,9 @@ class _TarotSpreadSelectScreenState extends State<TarotSpreadSelectScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Hata: $e')),
+      );
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -97,7 +99,10 @@ class _TarotSpreadSelectScreenState extends State<TarotSpreadSelectScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Açılım Türü', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
+                  const Text(
+                    'Açılım Türü',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                  ),
                   const SizedBox(height: 10),
                   Wrap(
                     spacing: 10,
@@ -111,11 +116,14 @@ class _TarotSpreadSelectScreenState extends State<TarotSpreadSelectScreen> {
                   const SizedBox(height: 14),
                   Text(
                     'Pozisyonlar:\n- ${_type.positionsTr.join("\n- ")}',
-                    style: TextStyle(color: Colors.white.withOpacity(0.85), height: 1.3),
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.85),
+                      height: 1.3,
+                    ),
                   ),
                   const SizedBox(height: 14),
                   Text(
-                    'Paket ücreti: ${price.toStringAsFixed(price == price.roundToDouble() ? 0 : 1)} ₺',
+                    'Paket ücreti: ${price.toStringAsFixed(0)} ₺',
                     style: const TextStyle(fontWeight: FontWeight.w900),
                   ),
                 ],
@@ -136,7 +144,7 @@ class _TarotSpreadSelectScreenState extends State<TarotSpreadSelectScreen> {
     final active = _type == t;
 
     final price = _prices[t] ?? 0.0;
-    final priceText = price.toStringAsFixed(price == price.roundToDouble() ? 0 : 1);
+    final priceText = price.toStringAsFixed(0);
 
     return InkWell(
       onTap: () => setState(() => _type = t),
@@ -145,14 +153,23 @@ class _TarotSpreadSelectScreenState extends State<TarotSpreadSelectScreen> {
         decoration: BoxDecoration(
           color: active ? Colors.white.withOpacity(0.10) : Colors.black.withOpacity(0.18),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: active ? Colors.amber.withOpacity(0.8) : Colors.white12),
+          border: Border.all(
+            color: active ? Colors.amber.withOpacity(0.8) : Colors.white12,
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(active ? Icons.check_circle : Icons.circle_outlined, size: 18, color: active ? Colors.amber : Colors.white54),
+            Icon(
+              active ? Icons.check_circle : Icons.circle_outlined,
+              size: 18,
+              color: active ? Colors.amber : Colors.white54,
+            ),
             const SizedBox(width: 8),
-            Text('${t.label}  •  $priceText ₺', style: const TextStyle(fontWeight: FontWeight.w800)),
+            Text(
+              '${t.label}  •  $priceText ₺',
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
           ],
         ),
       ),

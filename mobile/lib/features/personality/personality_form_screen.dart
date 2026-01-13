@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:fall_app/widgets/mystic_scaffold.dart';
-import 'package:fall_app/services/personality_api.dart';
+import 'package:lunaura/widgets/mystic_scaffold.dart';
+import 'package:lunaura/services/personality_api.dart';
 import 'personality_payment_screen.dart';
 
 class PersonalityFormScreen extends StatefulWidget {

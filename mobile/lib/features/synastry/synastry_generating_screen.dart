@@ -1,7 +1,7 @@
-// lib/features/synastry/synastry_generating_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 
+import '../../services/device_id_service.dart';
 import '../../services/synastry_api.dart';
 import 'synastry_result_screen.dart';
 
@@ -20,11 +20,13 @@ class _SynastryGeneratingScreenState extends State<SynastryGeneratingScreen> {
   String _status = 'processing';
   String? _error;
 
+  String? _deviceId;
+  bool _kickedOff = false; // ✅ generate bir kere çağrılsın
+
   @override
   void initState() {
     super.initState();
-    _poll();
-    _timer = Timer.periodic(const Duration(seconds: 2), (_) => _poll());
+    _init();
   }
 
   @override
@@ -33,9 +35,29 @@ class _SynastryGeneratingScreenState extends State<SynastryGeneratingScreen> {
     super.dispose();
   }
 
+  Future<void> _init() async {
+    try {
+      _deviceId = await DeviceIdService.getOrCreate();
+
+      // ✅ Kritik: payments/verify synastry generate tetiklemiyor → burada başlatıyoruz
+      await _api.generate(widget.readingId, deviceId: _deviceId);
+      _kickedOff = true;
+
+      // ilk poll + periyodik poll
+      await _poll();
+      _timer = Timer.periodic(const Duration(seconds: 2), (_) => _poll());
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _status = 'error';
+        _error = e.toString();
+      });
+    }
+  }
+
   Future<void> _poll() async {
     try {
-      final s = await _api.getStatus(widget.readingId);
+      final s = await _api.getStatus(widget.readingId, deviceId: _deviceId);
 
       if (!mounted) return;
       setState(() {
@@ -69,11 +91,36 @@ class _SynastryGeneratingScreenState extends State<SynastryGeneratingScreen> {
     }
   }
 
+  Future<void> _retry() async {
+    setState(() {
+      _status = 'processing';
+      _error = null;
+    });
+
+    try {
+      _deviceId ??= await DeviceIdService.getOrCreate();
+
+      // retry’da da generate tekrar çağrılabilir (backend idempotent ise sorun yok)
+      await _api.generate(widget.readingId, deviceId: _deviceId);
+      _kickedOff = true;
+
+      await _poll();
+      _timer?.cancel();
+      _timer = Timer.periodic(const Duration(seconds: 2), (_) => _poll());
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _status = 'error';
+        _error = e.toString();
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final msg = _status == 'error'
         ? ('Hata: ${_error ?? "Bilinmeyen hata"}')
-        : 'Analiz hazırlanıyor...';
+        : (_kickedOff ? 'Analiz hazırlanıyor...' : 'Başlatılıyor...');
 
     return Scaffold(
       appBar: AppBar(
@@ -111,7 +158,7 @@ class _SynastryGeneratingScreenState extends State<SynastryGeneratingScreen> {
                     backgroundColor: const Color(0xFFD6B15E),
                     foregroundColor: Colors.black,
                   ),
-                  onPressed: _poll,
+                  onPressed: _retry,
                   child: const Text('Tekrar Dene'),
                 ),
               ],
