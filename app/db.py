@@ -16,12 +16,42 @@ from app.models.personality_db import PersonalityReadingDB  # noqa: F401
 from app.models.synastry_db import SynastryReadingDB  # noqa: F401
 
 
+def _normalize_database_url(url: str) -> str:
+    """
+    Railway Postgres DATABASE_URL genelde:
+      postgresql://user:pass@host:5432/db
+
+    SQLAlchemy bu formatta default driver olarak psycopg2 arar.
+    Biz projede psycopg (v3) kullandığımız için URL'yi:
+      postgresql+psycopg://...
+
+    formatına çeviriyoruz.
+    """
+    if not url:
+        return url
+
+    # postgres:// bazen eski format olarak gelir -> postgresql:// gibi davran
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+
+    # Eğer zaten driver belirtilmişse dokunma
+    if url.startswith("postgresql+"):
+        return url
+
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg://" + url[len("postgresql://"):]
+
+    return url
+
+
+db_url = _normalize_database_url(settings.database_url)
+
 connect_args = {}
-if settings.database_url.startswith("sqlite"):
+if db_url.startswith("sqlite"):
     connect_args = {"check_same_thread": False}
 
 engine = create_engine(
-    settings.database_url,
+    db_url,
     echo=False,
     connect_args=connect_args,
 )
@@ -35,21 +65,21 @@ def get_session() -> Generator[Session, None, None]:
 def init_db() -> None:
     # ✅ hangi db'ye bağlıyız? (debug)
     try:
-        if settings.database_url.startswith("sqlite"):
+        if db_url.startswith("sqlite"):
             with engine.connect() as conn:
                 db_file = conn.execute(text("PRAGMA database_list;")).fetchall()
-            print(f"[DB] database_url = {settings.database_url}")
+            print(f"[DB] database_url = {db_url}")
             print(f"[DB] PRAGMA database_list = {db_file}")
         else:
-            print(f"[DB] database_url = {settings.database_url} (non-sqlite)")
+            print(f"[DB] database_url = {db_url} (non-sqlite)")
     except Exception as e:
-        print(f"[DB] Could not read database_list: {e}")
+        print(f"[DB] Could not read database info: {e}")
 
     # ✅ tabloları oluştur
     SQLModel.metadata.create_all(engine)
 
     # ✅ sqlite ise mini migration
-    if settings.database_url.startswith("sqlite"):
+    if db_url.startswith("sqlite"):
         ensure_hand_schema()
         ensure_tarot_schema()
         ensure_numerology_schema()
@@ -63,7 +93,7 @@ def init_db() -> None:
 # -------------------------
 
 def _sqlite_has_table(table: str) -> bool:
-    if not settings.database_url.startswith("sqlite"):
+    if not db_url.startswith("sqlite"):
         return False
     q = text("SELECT name FROM sqlite_master WHERE type='table' AND name=:t;")
     with engine.connect() as conn:
@@ -72,7 +102,7 @@ def _sqlite_has_table(table: str) -> bool:
 
 
 def _sqlite_has_column(table: str, column: str) -> bool:
-    if not settings.database_url.startswith("sqlite"):
+    if not db_url.startswith("sqlite"):
         return False
     q = text(f"PRAGMA table_info({table});")
     with engine.connect() as conn:
@@ -97,7 +127,7 @@ def _sqlite_add_cols(table: str, alters: list[str]) -> None:
 # -------------------------
 
 def ensure_hand_schema() -> None:
-    if not settings.database_url.startswith("sqlite"):
+    if not db_url.startswith("sqlite"):
         return
 
     table = "hand_readings"
@@ -128,7 +158,7 @@ def ensure_hand_schema() -> None:
 # -------------------------
 
 def ensure_tarot_schema() -> None:
-    if not settings.database_url.startswith("sqlite"):
+    if not db_url.startswith("sqlite"):
         return
 
     table = "tarot_readings"
@@ -137,7 +167,6 @@ def ensure_tarot_schema() -> None:
 
     alters: list[str] = []
 
-    # ✅ TarotReadingDB alanları (route'ların kullandığı her şey)
     if not _sqlite_has_column(table, "name"):
         alters.append("ALTER TABLE tarot_readings ADD COLUMN name VARCHAR;")
     if not _sqlite_has_column(table, "age"):
@@ -179,7 +208,7 @@ def ensure_tarot_schema() -> None:
 # -------------------------
 
 def ensure_numerology_schema() -> None:
-    if not settings.database_url.startswith("sqlite"):
+    if not db_url.startswith("sqlite"):
         return
 
     table = "numerology_readings"
@@ -207,7 +236,7 @@ def ensure_numerology_schema() -> None:
 # -------------------------
 
 def ensure_birthchart_schema() -> None:
-    if not settings.database_url.startswith("sqlite"):
+    if not db_url.startswith("sqlite"):
         return
 
     table = "birthchart_readings"
@@ -218,21 +247,6 @@ def ensure_birthchart_schema() -> None:
 
     if not _sqlite_has_column(table, "birth_time"):
         alters.append("ALTER TABLE birthchart_readings ADD COLUMN birth_time VARCHAR;")
-    if not _sqlite_has_column(table, "birth_city"):
-        alters.append("ALTER TABLE birthchart_readings ADD COLUMN birth_city VARCHAR;")
-    if not _sqlite_has_column(table, "birth_country"):
-        alters.append("ALTER TABLE birthchart_readings ADD COLUMN birth_country VARCHAR;")
-
-    if not _sqlite_has_column(table, "payment_ref"):
-        alters.append("ALTER TABLE birthchart_readings ADD COLUMN payment_ref VARCHAR;")
-    if not _sqlite_has_column(table, "rating"):
-        alters.append("ALTER TABLE birthchart_readings ADD COLUMN rating INTEGER;")
-    if not _sqlite_has_column(table, "result_text"):
-        alters.append("ALTER TABLE birthchart_readings ADD COLUMN result_text VARCHAR;")
-    if not _sqlite_has_column(table, "updated_at"):
-        alters.append("ALTER TABLE birthchart_readings ADD COLUMN updated_at DATETIME;")
-    if not _sqlite_has_column(table, "created_at"):
-        alters.append("ALTER TABLE birthchart_readings ADD COLUMN created_at DATETIME;")
 
     _sqlite_add_cols(table, alters)
 
@@ -242,7 +256,7 @@ def ensure_birthchart_schema() -> None:
 # -------------------------
 
 def ensure_personality_schema() -> None:
-    if not settings.database_url.startswith("sqlite"):
+    if not db_url.startswith("sqlite"):
         return
 
     table = "personality_readings"
@@ -270,7 +284,7 @@ def ensure_personality_schema() -> None:
 # -------------------------
 
 def ensure_synastry_schema() -> None:
-    if not settings.database_url.startswith("sqlite"):
+    if not db_url.startswith("sqlite"):
         return
 
     table = "synastry_readings"
@@ -279,25 +293,15 @@ def ensure_synastry_schema() -> None:
 
     alters: list[str] = []
 
-    required_cols = [
-        "reading_id",
-        "name_a", "birth_date_a", "birth_time_a", "birth_city_a", "birth_country_a",
-        "name_b", "birth_date_b", "birth_time_b", "birth_city_b", "birth_country_b",
-        "topic", "question",
-        "is_paid", "payment_ref", "status",
-        "rating", "result_text",
-        "updated_at", "created_at",
-    ]
-
-    for col in required_cols:
-        if not _sqlite_has_column(table, col):
-            if col in {"is_paid"}:
-                alters.append(f"ALTER TABLE {table} ADD COLUMN {col} BOOLEAN;")
-            elif col in {"rating"}:
-                alters.append(f"ALTER TABLE {table} ADD COLUMN {col} INTEGER;")
-            elif col in {"updated_at", "created_at"}:
-                alters.append(f"ALTER TABLE {table} ADD COLUMN {col} DATETIME;")
-            else:
-                alters.append(f"ALTER TABLE {table} ADD COLUMN {col} VARCHAR;")
+    if not _sqlite_has_column(table, "payment_ref"):
+        alters.append("ALTER TABLE synastry_readings ADD COLUMN payment_ref VARCHAR;")
+    if not _sqlite_has_column(table, "rating"):
+        alters.append("ALTER TABLE synastry_readings ADD COLUMN rating INTEGER;")
+    if not _sqlite_has_column(table, "result_text"):
+        alters.append("ALTER TABLE synastry_readings ADD COLUMN result_text VARCHAR;")
+    if not _sqlite_has_column(table, "updated_at"):
+        alters.append("ALTER TABLE synastry_readings ADD COLUMN updated_at DATETIME;")
+    if not _sqlite_has_column(table, "created_at"):
+        alters.append("ALTER TABLE synastry_readings ADD COLUMN created_at DATETIME;")
 
     _sqlite_add_cols(table, alters)
