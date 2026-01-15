@@ -30,11 +30,11 @@ def _normalize_database_url(url: str) -> str:
     if not url:
         return url
 
-    # postgres:// bazen eski format olarak gelir -> postgresql:// gibi davran
+    # eski format bazen gelir
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://"):]
 
-    # Eğer zaten driver belirtilmişse dokunma
+    # zaten driver belirtilmişse dokunma
     if url.startswith("postgresql+"):
         return url
 
@@ -63,6 +63,12 @@ def get_session() -> Generator[Session, None, None]:
 
 
 def init_db() -> None:
+    """
+    - SQLite: create_all + sqlite migration helper'ları
+    - Postgres: create_all'ı birden fazla worker aynı anda çalıştırınca
+      Postgres'te pg_type çatışması olabiliyor.
+      Bu yüzden advisory lock ile tek seferde init ediyoruz.
+    """
     # ✅ hangi db'ye bağlıyız? (debug)
     try:
         if db_url.startswith("sqlite"):
@@ -75,17 +81,29 @@ def init_db() -> None:
     except Exception as e:
         print(f"[DB] Could not read database info: {e}")
 
-    # ✅ tabloları oluştur
-    SQLModel.metadata.create_all(engine)
-
-    # ✅ sqlite ise mini migration
     if db_url.startswith("sqlite"):
+        # ✅ SQLite normal akış
+        SQLModel.metadata.create_all(engine)
         ensure_hand_schema()
         ensure_tarot_schema()
         ensure_numerology_schema()
         ensure_birthchart_schema()
         ensure_personality_schema()
         ensure_synastry_schema()
+        return
+
+    # ✅ Postgres / diğer DB'ler: advisory lock ile tek sefer init
+    # Kilit anahtarı: sabit bir int64 (proje bazlı)
+    LOCK_KEY = 91520260115
+
+    with engine.connect() as conn:
+        # Kilidi al (diğer worker burada bekler)
+        conn.execute(text("SELECT pg_advisory_lock(:k)"), {"k": LOCK_KEY})
+        try:
+            # Aynı connection ile create_all -> race condition biter
+            SQLModel.metadata.create_all(bind=conn)
+        finally:
+            conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": LOCK_KEY})
 
 
 # -------------------------
@@ -280,7 +298,7 @@ def ensure_personality_schema() -> None:
 
 
 # -------------------------
-# SYNSTRY SCHEMA (SQLITE)
+# SYNASRY SCHEMA (SQLITE)
 # -------------------------
 
 def ensure_synastry_schema() -> None:
