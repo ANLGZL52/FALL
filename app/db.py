@@ -1,4 +1,3 @@
-# app/db.py
 from __future__ import annotations
 
 from typing import Generator
@@ -17,10 +16,14 @@ from app.models.personality_db import PersonalityReadingDB  # noqa: F401
 from app.models.synastry_db import SynastryReadingDB  # noqa: F401
 
 
+connect_args = {}
+if settings.database_url.startswith("sqlite"):
+    connect_args = {"check_same_thread": False}
+
 engine = create_engine(
     settings.database_url,
     echo=False,
-    connect_args={"check_same_thread": False} if settings.database_url.startswith("sqlite") else {},
+    connect_args=connect_args,
 )
 
 
@@ -32,10 +35,13 @@ def get_session() -> Generator[Session, None, None]:
 def init_db() -> None:
     # ✅ hangi db'ye bağlıyız? (debug)
     try:
-        with engine.connect() as conn:
-            db_file = conn.execute(text("PRAGMA database_list;")).fetchall()
-        print(f"[DB] database_url = {settings.database_url}")
-        print(f"[DB] PRAGMA database_list = {db_file}")
+        if settings.database_url.startswith("sqlite"):
+            with engine.connect() as conn:
+                db_file = conn.execute(text("PRAGMA database_list;")).fetchall()
+            print(f"[DB] database_url = {settings.database_url}")
+            print(f"[DB] PRAGMA database_list = {db_file}")
+        else:
+            print(f"[DB] database_url = {settings.database_url} (non-sqlite)")
     except Exception as e:
         print(f"[DB] Could not read database_list: {e}")
 
@@ -43,12 +49,13 @@ def init_db() -> None:
     SQLModel.metadata.create_all(engine)
 
     # ✅ sqlite ise mini migration
-    ensure_hand_schema()
-    ensure_tarot_schema()
-    ensure_numerology_schema()
-    ensure_birthchart_schema()
-    ensure_personality_schema()
-    ensure_synastry_schema()
+    if settings.database_url.startswith("sqlite"):
+        ensure_hand_schema()
+        ensure_tarot_schema()
+        ensure_numerology_schema()
+        ensure_birthchart_schema()
+        ensure_personality_schema()
+        ensure_synastry_schema()
 
 
 # -------------------------

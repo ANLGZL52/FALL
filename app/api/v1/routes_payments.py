@@ -11,6 +11,9 @@ from sqlmodel import SQLModel, Field, Session, select
 from app.db import get_session
 from app.schemas.payments import StartPaymentRequest, StartPaymentResponse
 
+# ✅ IAP verify service (NEW)
+from app.services.iap_verify_service import verify_google_play, verify_app_store
+
 # repos
 from app.repositories import tarot_repo
 from app.repositories.hand_repo import (
@@ -89,6 +92,7 @@ class PaymentDB(SQLModel, table=True):
 
 _db_inited = False
 
+
 def _ensure_db(session: Session) -> None:
     """
     Bozmadan: ilk çağrıda payments tablosunu oluşturur.
@@ -99,7 +103,6 @@ def _ensure_db(session: Session) -> None:
         return
 
     bind = session.get_bind()
-    # Sadece bu modüldeki PaymentDB’nin tablo kaydını garantiye alalım
     SQLModel.metadata.create_all(bind)
     _db_inited = True
 
@@ -147,6 +150,7 @@ class PaymentIntentRequest(BaseModel):
     reading_id: str = PField(..., min_length=3)
     sku: str = PField(..., min_length=3)
 
+
 class PaymentIntentResponse(BaseModel):
     ok: bool = True
     status: Literal["pending"] = "pending"
@@ -157,6 +161,7 @@ class PaymentIntentResponse(BaseModel):
     amount: float
     currency: str = "TRY"
 
+
 class PaymentVerifyRequest(BaseModel):
     payment_id: str = PField(..., min_length=6)
     platform: Literal["google_play", "app_store"]
@@ -165,6 +170,7 @@ class PaymentVerifyRequest(BaseModel):
 
     purchase_token: Optional[str] = None
     receipt_data: Optional[str] = None
+
 
 class PaymentVerifyResponse(BaseModel):
     ok: bool = True
@@ -265,7 +271,7 @@ async def verify_payment(
     x_device_id: Optional[str] = Header(default=None, alias="X-Device-Id"),
 ):
     """
-    ✅ Stub verify + server-side paid açma:
+    ✅ Store doğrulama + server-side paid açma:
     - tarot ✅
     - hand ✅
     - coffee ✅
@@ -298,13 +304,22 @@ async def verify_payment(
             raise HTTPException(status_code=409, detail="payment already verified with different transaction_id")
         return PaymentVerifyResponse(ok=True, verified=True, payment_id=payment.id, status="verified")
 
-    # Stub kontrol (platform token/receipt)
+    # ✅ Store doğrulama (dev: stub, prod: gerçek doğrulama bekler)
     if req.platform == "google_play":
-        if not req.purchase_token or len(req.purchase_token.strip()) < 6:
-            raise HTTPException(status_code=422, detail="purchase_token is required for google_play")
+        res = verify_google_play(
+            purchase_token=(req.purchase_token or ""),
+            sku=req.sku,
+            transaction_id=req.transaction_id,
+        )
     else:
-        if not req.receipt_data or len(req.receipt_data.strip()) < 20:
-            raise HTTPException(status_code=422, detail="receipt_data is required for app_store")
+        res = verify_app_store(
+            receipt_data=(req.receipt_data or ""),
+            sku=req.sku,
+            transaction_id=req.transaction_id,
+        )
+
+    if not res.ok:
+        raise HTTPException(status_code=402, detail=f"IAP verification failed: {res.message}")
 
     # ✅ transaction replay engeli
     _reject_if_transaction_used(session, req.platform, req.transaction_id, current_payment_id=payment.id)
@@ -395,7 +410,6 @@ async def verify_payment(
             raise HTTPException(status_code=500, detail="Synastry mark_paid failed")
 
     else:
-        # SKU_CATALOG dışı product gelmemeli ama net hata iyi olur
         raise HTTPException(status_code=422, detail=f"Unsupported product: {sku_product}")
 
     return PaymentVerifyResponse(ok=True, verified=True, payment_id=payment.id, status="verified")

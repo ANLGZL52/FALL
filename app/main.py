@@ -1,19 +1,23 @@
-# app/main.py
 from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1 import api_router  # ✅ bütün router'lar burada
-from app.db import init_db  # ✅ DB init + sqlite migration
+from app.api.v1 import api_router
+from app.core.config import settings
+from app.db import init_db
 
+app = FastAPI(title="Lunaura API")
 
-app = FastAPI(title="FALL API")
+origins = settings.cors_origins
+
+# "*" varsa allow_credentials=False olmalı
+allow_credentials = False if origins == ["*"] else True
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # dev için
-    allow_credentials=True,
+    allow_origins=origins,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -21,15 +25,13 @@ app.add_middleware(
 
 @app.on_event("startup")
 def _startup() -> None:
-    # ✅ create_all + sqlite migration helper'lar burada çalışır
+    settings.ensure_dirs()
     init_db()
 
 
-# (opsiyonel ama çok işe yarıyor)
 @app.get("/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "env": settings.environment}
 
 
-# ✅ BÜTÜN ROUTE'LARI TEK SEFERDE EKLER
 app.include_router(api_router, prefix="/api/v1")
