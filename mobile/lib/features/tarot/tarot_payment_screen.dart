@@ -1,4 +1,3 @@
-// lib/features/tarot/tarot_payment_screen.dart
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -6,6 +5,8 @@ import '../../services/payment_api.dart';
 import '../../services/tarot_api.dart';
 import '../../services/device_id_service.dart';
 import '../../services/iap_service.dart';
+import '../../services/product_catalog.dart';
+
 import '../../widgets/glass_card.dart';
 import '../../widgets/gradient_button.dart';
 import '../../widgets/mystic_scaffold.dart';
@@ -35,7 +36,7 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
   bool _loading = false;
   String? _lastPaymentId;
 
-  // ✅ Debug’ta store test etmek istersen bunu true yap
+  // Debug’ta store test etmek istersen true yap
   static const bool debugUseStoreIap = false;
 
   double get _amount {
@@ -52,11 +53,11 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
   String get _sku {
     switch (widget.spreadType) {
       case TarotSpreadType.three:
-        return "fall_tarot_3_149";
+        return ProductCatalog.tarot3_149;
       case TarotSpreadType.six:
-        return "fall_tarot_6_199";
+        return ProductCatalog.tarot6_199;
       case TarotSpreadType.twelve:
-        return "fall_tarot_12_250";
+        return ProductCatalog.tarot12_250;
     }
   }
 
@@ -97,7 +98,6 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
   }
 
   Future<void> _payLegacyMock({required String deviceId}) async {
-    // 1) legacy mock ödeme (backend /payments/start)
     final res = await PaymentApi.startPayment(
       readingId: widget.readingId,
       amount: _amount,
@@ -108,14 +108,12 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
     if (!res.ok) throw Exception('Ödeme başarısız: ${res.provider}');
     _lastPaymentId = res.paymentId;
 
-    // 2) tarot reading'i paid işaretle
     await TarotApi.markPaid(
       readingId: widget.readingId,
       paymentRef: res.paymentId,
       deviceId: deviceId,
     );
 
-    // 3) generate
     final gen = await TarotApi.generate(
       readingId: widget.readingId,
       deviceId: deviceId,
@@ -128,7 +126,6 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
   }
 
   Future<void> _payStoreIap({required String deviceId}) async {
-    // 1) gerçek store purchase + backend verify
     final verify = await IapService.instance.buyAndVerify(
       readingId: widget.readingId,
       sku: _sku,
@@ -137,7 +134,6 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
     if (!verify.verified) throw Exception("Ödeme doğrulanamadı: ${verify.status}");
     _lastPaymentId = verify.paymentId;
 
-    // 2) verify sonrası backend reading'i paid yaptı varsayımıyla generate
     final gen = await TarotApi.generate(
       readingId: widget.readingId,
       deviceId: deviceId,
@@ -154,9 +150,6 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
     try {
       final deviceId = await DeviceIdService.getOrCreate();
 
-      // ✅ KURAL:
-      // - Release: Store/IAP çalışsın
-      // - Debug: default legacy (istersen debugUseStoreIap = true ile store test)
       if (kReleaseMode) {
         await _payStoreIap(deviceId: deviceId);
       } else {
@@ -224,7 +217,7 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
                           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
                         ),
                         const SizedBox(height: 6),
-                        if (!kReleaseMode) // debug’da göster, release’de gerek yok
+                        if (!kReleaseMode)
                           Text(
                             "SKU: $_sku",
                             style: TextStyle(color: Colors.white.withOpacity(0.70), fontSize: 12),

@@ -14,7 +14,7 @@ from app.models.numerology_db import NumerologyReadingDB  # noqa: F401
 from app.models.birthchart_db import BirthChartReadingDB  # noqa: F401
 from app.models.personality_db import PersonalityReadingDB  # noqa: F401
 from app.models.synastry_db import SynastryReadingDB  # noqa: F401
-
+from app.models.payment_db import PaymentDB  # noqa: F401
 
 def _normalize_database_url(url: str) -> str:
     """

@@ -1,10 +1,10 @@
 // lib/features/iap/iap_debug_screen.dart
 import 'dart:async';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 
 import '../../services/iap_service.dart';
+import '../../services/product_catalog.dart';
 import '../../widgets/mystic_scaffold.dart';
 
 class IapDebugScreen extends StatefulWidget {
@@ -15,13 +15,7 @@ class IapDebugScreen extends StatefulWidget {
 }
 
 class _IapDebugScreenState extends State<IapDebugScreen> {
-  // Uygulamadaki SKU’ların (Play Console’daki Product ID) listesi
-  // Burayı kendi ürünlerine göre çoğaltabilirsin.
-  final List<String> _skus = const [
-    'fall_birthchart_299',
-    'fall_numerology_299',
-    'fall_personality_399',
-  ];
+  final List<String> _skus = ProductCatalog.all;
 
   bool _checking = false;
   bool? _iapAvailable;
@@ -45,7 +39,7 @@ class _IapDebugScreenState extends State<IapDebugScreen> {
       if (!available) {
         setState(() {
           _lastError =
-              'IAP available değil. (Emulatör/cihazda Play Store yok, hesap yok, ya da test dağıtımı yok olabilir.)';
+              'IAP available değil. (Cihazda Play Store yok, test dağıtımı yok, test hesabı yok, veya internal build değil.)';
         });
         return;
       }
@@ -60,7 +54,7 @@ class _IapDebugScreenState extends State<IapDebugScreen> {
       if (map.isEmpty) {
         setState(() {
           _lastError =
-              'Ürün bulunamadı. SKU’lar Play Console’da var mı? Internal testing üzerinden kurulu mu? Product ID birebir aynı mı?';
+              'Ürün bulunamadı. Play Console ürünleri "Aktif" mi? Internal Testing ile kurulu mu? Product ID birebir aynı mı?';
         });
       }
     } catch (e) {
@@ -71,14 +65,6 @@ class _IapDebugScreenState extends State<IapDebugScreen> {
   }
 
   Future<void> _buyTest(String sku) async {
-    // Bu ekran debug amaçlı: gerçek readingId’ye ihtiyaç var ama backend createIntent istiyor.
-    // O yüzden burada "dummy" bir readingId ile değil, senin backend mantığında
-    // var olan bir readingId ile test etmeliyiz.
-    //
-    // En sağlam yöntem: Uygulamada normal akıştan bir reading oluştur,
-    // ardından bu ekrana gelip o readingId’yi buraya yazıp satın al.
-    //
-    // Şimdilik: hızlı test için input alacağız.
     final controller = TextEditingController();
 
     final readingId = await showDialog<String>(
@@ -137,7 +123,6 @@ class _IapDebugScreenState extends State<IapDebugScreen> {
   @override
   void initState() {
     super.initState();
-    // Ekran açılınca otomatik kontrol
     unawaited(_checkAndLoad());
   }
 
@@ -183,8 +168,7 @@ class _IapDebugScreenState extends State<IapDebugScreen> {
             '1) isAvailable\n'
             '2) queryProductDetails (SKU görünür mü)\n'
             '3) buy + purchaseStream + backend verify\n\n'
-            'Not: Debug’da DevicePreview açıkken de çalışır.\n'
-            'Gerçek cihaz + Internal testing ile test etmen en sağlıklısı.',
+            'En sağlıklısı: gerçek cihaz + Internal Testing ile test.',
             style: TextStyle(color: Colors.white.withOpacity(0.78), height: 1.25),
           ),
           const SizedBox(height: 12),
@@ -271,7 +255,9 @@ class _IapDebugScreenState extends State<IapDebugScreen> {
               decoration: BoxDecoration(
                 color: Colors.black.withOpacity(0.35),
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: found ? Colors.white12 : Colors.redAccent.withOpacity(0.4)),
+                border: Border.all(
+                  color: found ? Colors.white12 : Colors.redAccent.withOpacity(0.4),
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -282,7 +268,9 @@ class _IapDebugScreenState extends State<IapDebugScreen> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    found ? '${p.title}\n${p.description}\nPrice: ${p.price}' : '❌ Bu SKU store’da görünmüyor.',
+                    found
+                        ? '${p.title}\n${p.description}\nPrice: ${p.price}'
+                        : '❌ Bu SKU store’da görünmüyor.',
                     style: TextStyle(color: Colors.white.withOpacity(0.78), height: 1.25),
                   ),
                   const SizedBox(height: 10),

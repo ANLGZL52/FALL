@@ -1,66 +1,26 @@
-// lib/services/product_catalog.dart
-
-enum ProductType {
-  coffee,
-  hand,
-  numerology,
-  personality,
-  birthchart,
-  synastry,
-  tarot,
-}
-
-class ProductSku {
-  final String sku;
-  final ProductType type;
-  final String title;
-  final double amount;
-  final String currency;
-
-  const ProductSku({
-    required this.sku,
-    required this.type,
-    required this.title,
-    required this.amount,
-    this.currency = "TRY",
-  });
-}
-
 class ProductCatalog {
-  // Tek kaynak: SKU -> metadata
-  static const Map<String, ProductSku> items = {
-    // Numerology
-    "fall_numerology_299": ProductSku(
-      sku: "fall_numerology_299",
-      type: ProductType.numerology,
-      title: "Numeroloji Analizi",
-      amount: 299.0,
-    ),
+  // ✅ Play Console Product ID = SKU
+  static const String coffee49 = "fall_coffee_49";
+  static const String hand39 = "fall_hand_39";
 
-    // Birthchart
-    "fall_birthchart_299": ProductSku(
-      sku: "fall_birthchart_299",
-      type: ProductType.birthchart,
-      title: "Doğum Haritası",
-      amount: 299.0,
-    ),
+  static const String numerology299 = "fall_numerology_299";
+  static const String birthchart299 = "fall_birthchart_299";
+  static const String personality399 = "fall_personality_399";
+  static const String synastry149 = "fall_synastry_149";
 
-    // Personality
-    "fall_personality_399": ProductSku(
-      sku: "fall_personality_399",
-      type: ProductType.personality,
-      title: "Kişilik Analizi",
-      amount: 399.0,
-    ),
+  static const String tarot3_149 = "fall_tarot_3_149";
+  static const String tarot6_199 = "fall_tarot_6_199";
+  static const String tarot12_250 = "fall_tarot_12_250";
 
-    // (İstersen buraya coffee/hand/tarot/synastry sku'larını da ekleriz)
+  static const Set<String> allSkus = {
+    coffee49,
+    hand39,
+    numerology299,
+    birthchart299,
+    personality399,
+    synastry149,
+    tarot3_149,
+    tarot6_199,
+    tarot12_250,
   };
-
-  static ProductSku get(String sku) {
-    final p = items[sku];
-    if (p == null) {
-      throw Exception("SKU catalog'da yok: $sku");
-    }
-    return p;
-  }
 }

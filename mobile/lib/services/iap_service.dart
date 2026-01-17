@@ -1,4 +1,3 @@
-// lib/services/iap_service.dart
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -19,7 +18,6 @@ class IapService {
   String? _activePaymentId;
   String? _activeSku;
 
-  /// Pending’de sonsuza kadar kalmasın
   static const Duration _defaultTimeout = Duration(minutes: 2);
 
   bool get _hasActiveFlow => _verifyCompleter != null;
@@ -53,7 +51,6 @@ class IapService {
     return map;
   }
 
-  /// intent -> store purchase -> verify
   Future<PaymentVerifyResult> buyAndVerify({
     required String readingId,
     required String sku,
@@ -75,11 +72,11 @@ class IapService {
     _activePaymentId = intent.paymentId;
     _activeSku = sku;
 
-    // 2) Purchase stream (tek kez)
+    // 2) Stream
     _verifyCompleter = Completer<PaymentVerifyResult>();
     await _ensureListener(deviceId);
 
-    // 3) Buy (consumable: her kullanımda ödeme)
+    // 3) Buy (consumable)
     final products = await loadProducts({sku});
     final pd = products[sku];
     if (pd == null) {
@@ -97,37 +94,27 @@ class IapService {
       throw Exception("Satın alma başlatılamadı.");
     }
 
-    // 4) Timeout ile bekle
-    try {
-      return await _verifyCompleter!.future.timeout(
-        timeout,
-        onTimeout: () {
-          _fail("Ödeme zaman aşımına uğradı. (pending çok uzun sürdü)");
-          throw Exception("Ödeme zaman aşımı.");
-        },
-      );
-    } catch (_) {
-      rethrow;
-    }
+    // 4) Wait with timeout
+    return await _verifyCompleter!.future.timeout(
+      timeout,
+      onTimeout: () {
+        _fail("Ödeme zaman aşımına uğradı. (pending çok uzun sürdü)");
+        throw Exception("Ödeme zaman aşımı.");
+      },
+    );
   }
 
   Future<void> _handlePurchaseUpdate(String deviceId, PurchaseDetails p) async {
-    // Active flow yoksa gelen eventleri ignore et (restore vb.)
     if (_activeSku == null || _activePaymentId == null || _verifyCompleter == null) return;
-
-    // Bu event bizim beklediğimiz SKU değilse ignore
     if (p.productID != _activeSku) return;
 
-    // pending -> bekle
     if (p.status == PurchaseStatus.pending) return;
 
-    // canceled
     if (p.status == PurchaseStatus.canceled) {
       _fail("Satın alma iptal edildi.");
       return;
     }
 
-    // error
     if (p.status == PurchaseStatus.error) {
       _fail("Satın alma hatası: ${p.error}");
       return;
@@ -137,12 +124,10 @@ class IapService {
       try {
         final platform = Platform.isIOS ? "app_store" : "google_play";
 
-        // purchaseID bazen null gelebiliyor -> fallback üret
-        final transactionId = (p.purchaseID != null && p.purchaseID!.trim().isNotEmpty)
-            ? p.purchaseID!.trim()
-            : "TXN-${DateTime.now().millisecondsSinceEpoch}";
+        // transactionId fallback: purchaseID bazen null/boş gelebiliyor
+        final rawTxn = (p.purchaseID ?? '').trim();
+        final transactionId = rawTxn.isNotEmpty ? rawTxn : "TXN-${DateTime.now().millisecondsSinceEpoch}";
 
-        // InAppPurchase plugin: iOS’ta çoğu zaman serverVerificationData daha güvenilir
         final localData = p.verificationData.localVerificationData;
         final serverData = p.verificationData.serverVerificationData;
 
@@ -150,7 +135,6 @@ class IapService {
         String? receiptData;
 
         if (platform == "google_play") {
-          // Android: localData genelde JSON (purchaseToken vs)
           purchaseToken = _extractAndroidPurchaseToken(localData) ??
               _extractAndroidPurchaseToken(serverData) ??
               localData;
@@ -159,14 +143,12 @@ class IapService {
             throw Exception("Android purchaseToken alınamadı.");
           }
         } else {
-          // iOS: receipt çoğu zaman serverData’da gelir; fallback local
           receiptData = (serverData.trim().length >= 20) ? serverData : localData;
-          if ((receiptData).trim().length < 20) {
+          if (receiptData.trim().length < 20) {
             throw Exception("iOS receiptData alınamadı.");
           }
         }
 
-        // ✅ Backend verify (server-side unlock)
         final res = await PurchaseApi.verify(
           deviceId: deviceId,
           paymentId: _activePaymentId!,
@@ -182,7 +164,6 @@ class IapService {
           return;
         }
 
-        // ✅ Transaction’ı tamamla (deliver content -> then completePurchase)
         if (p.pendingCompletePurchase) {
           await _iap.completePurchase(p);
         }

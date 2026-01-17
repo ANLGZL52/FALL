@@ -1,4 +1,3 @@
-// lib/services/payment_api.dart
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
@@ -17,14 +16,14 @@ String _extractErrorMessage(String body) {
 }
 
 /// ===============================
-/// LEGACY START (bozulmasın diye duruyor)
+/// LEGACY START (bozulmasın)
 /// POST /payments/start
 /// ===============================
 
 class StartPaymentResult {
   final bool ok;
-  final String status; // success
-  final String provider; // mock
+  final String status;
+  final String provider;
   final String paymentId;
   final String product;
   final String readingId;
@@ -42,7 +41,6 @@ class StartPaymentResult {
 
   factory StartPaymentResult.fromJson(Map<String, dynamic> j) {
     final pid = (j['payment_id'] ?? j['paymentId'] ?? j['payment_ref'] ?? j['paymentRef'] ?? '').toString();
-
     final okVal = j.containsKey('ok') ? j['ok'] : true;
     final ok = okVal is bool ? okVal : (okVal.toString().toLowerCase() == 'true');
 
@@ -53,19 +51,16 @@ class StartPaymentResult {
       paymentId: pid,
       product: (j['product'] ?? j['product_type'] ?? j['productType'] ?? '').toString(),
       readingId: (j['reading_id'] ?? j['readingId'] ?? '').toString(),
-      amount: (j['amount'] is num)
-          ? (j['amount'] as num).toDouble()
-          : double.tryParse('${j['amount']}') ?? 0.0,
+      amount: (j['amount'] is num) ? (j['amount'] as num).toDouble() : double.tryParse('${j['amount']}') ?? 0.0,
     );
   }
 }
 
 class PaymentApi {
-  /// ✅ LEGACY START (mock) — mevcut akışı bozmaz.
   static Future<StartPaymentResult> startPayment({
     required String readingId,
     double? amount,
-    required String product, // coffee | hand | tarot | ...
+    required String product,
     String? deviceId,
   }) async {
     final url = Uri.parse('${ApiBase.baseUrl}/payments/start');
@@ -77,31 +72,26 @@ class PaymentApi {
     if (amount != null) body["amount"] = amount;
 
     final res = await http
-        .post(
-          url,
-          headers: ApiBase.headers(deviceId: deviceId),
-          body: jsonEncode(body),
-        )
+        .post(url, headers: ApiBase.headers(deviceId: deviceId), body: jsonEncode(body))
         .timeout(const Duration(seconds: 30));
 
     if (res.statusCode >= 400) {
       throw Exception('payments/start failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
     }
 
-    final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-    return StartPaymentResult.fromJson(decoded);
+    return StartPaymentResult.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 }
 
 /// ===============================
-/// NEW STORE/IAP FLOW (intent + verify)
+/// NEW STORE/IAP FLOW
 /// POST /payments/intent
 /// POST /payments/verify
 /// ===============================
 
 class PaymentIntentResult {
   final bool ok;
-  final String status; // pending
+  final String status;
   final String paymentId;
   final String readingId;
   final String sku;
@@ -124,21 +114,14 @@ class PaymentIntentResult {
     final okVal = j.containsKey('ok') ? j['ok'] : true;
     final ok = okVal is bool ? okVal : (okVal.toString().toLowerCase() == 'true');
 
-    // Fallback: snake_case + camelCase + id
-    final paymentId = (j['payment_id'] ?? j['paymentId'] ?? j['id'] ?? '').toString();
-    final readingId = (j['reading_id'] ?? j['readingId'] ?? '').toString();
-    final product = (j['product'] ?? j['product_type'] ?? j['productType'] ?? '').toString();
-
     return PaymentIntentResult(
       ok: ok,
       status: (j['status'] ?? 'pending').toString(),
-      paymentId: paymentId,
-      readingId: readingId,
+      paymentId: (j['payment_id'] ?? j['paymentId'] ?? j['id'] ?? '').toString(),
+      readingId: (j['reading_id'] ?? j['readingId'] ?? '').toString(),
       sku: (j['sku'] ?? '').toString(),
-      product: product,
-      amount: (j['amount'] is num)
-          ? (j['amount'] as num).toDouble()
-          : double.tryParse('${j['amount']}') ?? 0.0,
+      product: (j['product'] ?? j['product_type'] ?? j['productType'] ?? '').toString(),
+      amount: (j['amount'] is num) ? (j['amount'] as num).toDouble() : double.tryParse('${j['amount']}') ?? 0.0,
       currency: (j['currency'] ?? 'TRY').toString(),
     );
   }
@@ -164,13 +147,10 @@ class PaymentVerifyResult {
     final verVal = j.containsKey('verified') ? j['verified'] : false;
     final verified = verVal is bool ? verVal : (verVal.toString().toLowerCase() == 'true');
 
-    // Fallback: snake_case + camelCase + id
-    final paymentId = (j['payment_id'] ?? j['paymentId'] ?? j['id'] ?? '').toString();
-
     return PaymentVerifyResult(
       ok: ok,
       verified: verified,
-      paymentId: paymentId,
+      paymentId: (j['payment_id'] ?? j['paymentId'] ?? j['id'] ?? '').toString(),
       status: (j['status'] ?? '').toString(),
     );
   }
@@ -179,42 +159,32 @@ class PaymentVerifyResult {
 class PurchaseApi {
   static Uri _u(String path) => Uri.parse('${ApiBase.baseUrl}$path');
 
-  /// ✅ /payments/intent
   static Future<PaymentIntentResult> createIntent({
     required String deviceId,
     required String readingId,
     required String sku,
   }) async {
-    final body = <String, dynamic>{
-      "reading_id": readingId,
-      "sku": sku,
-    };
+    final body = <String, dynamic>{"reading_id": readingId, "sku": sku};
 
     final res = await http
-        .post(
-          _u('/payments/intent'),
-          headers: ApiBase.headers(deviceId: deviceId),
-          body: jsonEncode(body),
-        )
+        .post(_u('/payments/intent'), headers: ApiBase.headers(deviceId: deviceId), body: jsonEncode(body))
         .timeout(const Duration(seconds: 30));
 
     if (res.statusCode >= 400) {
       throw Exception('payments/intent failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
     }
 
-    final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-    return PaymentIntentResult.fromJson(decoded);
+    return PaymentIntentResult.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
-  /// ✅ /payments/verify
   static Future<PaymentVerifyResult> verify({
     required String deviceId,
     required String paymentId,
     required String sku,
-    required String platform, // "google_play" | "app_store"
+    required String platform, // google_play | app_store
     required String transactionId,
-    String? purchaseToken, // google
-    String? receiptData, // apple (base64)
+    String? purchaseToken,
+    String? receiptData,
   }) async {
     final body = <String, dynamic>{
       "payment_id": paymentId,
@@ -223,36 +193,26 @@ class PurchaseApi {
       "transaction_id": transactionId,
     };
 
-    final pt = (purchaseToken ?? '').trim();
-    final rd = (receiptData ?? '').trim();
-
     if (platform == "google_play") {
-      if (pt.length < 6) {
-        throw Exception("purchaseToken gerekli (google_play) ve en az 6 karakter olmalı.");
-      }
+      final pt = (purchaseToken ?? '').trim();
+      if (pt.length < 6) throw Exception("purchaseToken gerekli (google_play).");
       body["purchase_token"] = pt;
     } else if (platform == "app_store") {
-      if (rd.length < 20) {
-        throw Exception("receiptData gerekli (app_store) ve en az 20 karakter olmalı.");
-      }
+      final rd = (receiptData ?? '').trim();
+      if (rd.length < 20) throw Exception("receiptData gerekli (app_store).");
       body["receipt_data"] = rd;
     } else {
       throw Exception('platform geçersiz: $platform');
     }
 
     final res = await http
-        .post(
-          _u('/payments/verify'),
-          headers: ApiBase.headers(deviceId: deviceId),
-          body: jsonEncode(body),
-        )
+        .post(_u('/payments/verify'), headers: ApiBase.headers(deviceId: deviceId), body: jsonEncode(body))
         .timeout(const Duration(seconds: 30));
 
     if (res.statusCode >= 400) {
       throw Exception('payments/verify failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
     }
 
-    final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-    return PaymentVerifyResult.fromJson(decoded);
+    return PaymentVerifyResult.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 }

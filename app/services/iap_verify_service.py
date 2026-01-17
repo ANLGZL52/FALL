@@ -13,15 +13,6 @@ class IAPVerifyResult:
 
 
 def verify_google_play(*, purchase_token: str, sku: str, transaction_id: str) -> IAPVerifyResult:
-    """
-    Google Play gerçek doğrulama (prod):
-      - Play Developer API üzerinden purchaseToken doğrulanmalı
-      - packageName + productId (sku) + token ile kontrol edilmeli
-
-    Şimdilik:
-      - allow_stub_iap True ise basit kontrol
-      - prod’da NotImplemented ile güvenli şekilde durdur
-    """
     if settings.allow_stub_iap:
         if not purchase_token or len(purchase_token.strip()) < 6:
             return IAPVerifyResult(ok=False, message="invalid purchase_token")
@@ -38,15 +29,6 @@ def verify_google_play(*, purchase_token: str, sku: str, transaction_id: str) ->
 
 
 def verify_app_store(*, receipt_data: str, sku: str, transaction_id: str) -> IAPVerifyResult:
-    """
-    App Store gerçek doğrulama (prod):
-      - Apple verifyReceipt / App Store Server API ile receipt doğrulanmalı
-      - bundleId + productId + transactionId eşleştirilmeli
-
-    Şimdilik:
-      - allow_stub_iap True ise basit kontrol
-      - prod’da NotImplemented ile güvenli şekilde durdur
-    """
     if settings.allow_stub_iap:
         if not receipt_data or len(receipt_data.strip()) < 20:
             return IAPVerifyResult(ok=False, message="invalid receipt_data")
