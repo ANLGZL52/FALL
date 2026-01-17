@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../services/coffee_api.dart';
 import '../../services/payment_api.dart';
+import '../../services/purchase_api.dart';
 import '../../services/device_id_service.dart';
 import '../../widgets/glass_card.dart';
 import '../../widgets/gradient_button.dart';
@@ -37,10 +38,9 @@ class _CoffeePaymentScreenState extends State<CoffeePaymentScreen> {
   }
 
   Future<void> _payLegacyMock() async {
-    // ✅ Mevcut sistem (BOZULMASIN): payments/start -> coffee/mark-paid
     final res = await PaymentApi.startPayment(
       readingId: widget.readingId,
-      amount: _coffeePrice, // ✅ fiyatı 49'a çektik (planınla uyumlu)
+      amount: _coffeePrice,
       product: "coffee",
     );
 
@@ -50,14 +50,13 @@ class _CoffeePaymentScreenState extends State<CoffeePaymentScreen> {
 
     await CoffeeApi.markPaid(
       readingId: widget.readingId,
-      paymentRef: res.paymentId, // TEST-... geliyor
+      paymentRef: res.paymentId,
     );
 
     await _goNext();
   }
 
   Future<void> _payStoreFlow() async {
-    // ✅ Yeni akış: intent -> (IAP) -> verify (server-side paid unlock)
     final deviceId = await DeviceIdService.getOrCreate();
 
     final intent = await PurchaseApi.createIntent(
@@ -66,9 +65,6 @@ class _CoffeePaymentScreenState extends State<CoffeePaymentScreen> {
       sku: _coffeeSku,
     );
 
-    // 🔥 Şu an gerçek store purchase yok.
-    // Debug modda backend verify’ı test etmek için dummy token/transaction kullanıyoruz.
-    // Release’te (store’a çıkarken) bunu IAP’den gelen gerçek token ile değiştireceğiz.
     final bool useMockPurchase = !kReleaseMode;
 
     String? purchaseToken;
@@ -77,18 +73,15 @@ class _CoffeePaymentScreenState extends State<CoffeePaymentScreen> {
 
     final String transactionId = useMockPurchase
         ? "TXN-DEV-${DateTime.now().millisecondsSinceEpoch}"
-        : "TXN-REAL"; // TODO: IAP’den al
+        : "TXN-REAL";
 
     if (useMockPurchase) {
       if (platform == "google_play") {
-        purchaseToken = "DEV_TOKEN_123456"; // ✅ backend stub: min 6 char
+        purchaseToken = "DEV_TOKEN_123456";
       } else {
-        receiptData = "DEV_RECEIPT_DATA_ABCDEFGHIJKLMNOPQRSTUVWXYZ"; // ✅ backend stub: min 20 char
+        receiptData = "DEV_RECEIPT_DATA_ABCDEFGHIJKLMNOPQRSTUVWXYZ";
       }
     } else {
-      // TODO (store): in_app_purchase ile gerçek satın alma yap
-      // - Google: purchaseToken al
-      // - iOS: receipt/base64 al
       throw Exception("Store satın alma entegrasyonu (IAP) henüz bağlanmadı. Debug modda test edebilirsin.");
     }
 
@@ -106,17 +99,12 @@ class _CoffeePaymentScreenState extends State<CoffeePaymentScreen> {
       throw Exception("Ödeme doğrulanamadı: ${verify.status}");
     }
 
-    // ✅ verify sonrası backend ilgili reading’i server-side paid yaptı.
-    // coffee/mark-paid çağırmıyoruz.
     await _goNext();
   }
 
   Future<void> _pay() async {
     setState(() => _loading = true);
     try {
-      // ✅ Şu an sistemi bozmamak için:
-      // - debug’da: legacy çalışsın (mevcut akış)
-      // - istersen debug’da store flow test etmek için alttaki flag’i true yap.
       const bool debugTestStoreFlow = false;
 
       if (!kReleaseMode && debugTestStoreFlow) {
@@ -139,49 +127,29 @@ class _CoffeePaymentScreenState extends State<CoffeePaymentScreen> {
     return MysticScaffold(
       scrimOpacity: 0.84,
       patternOpacity: 0.16,
-      appBar: AppBar(
-        title: const Text('Ödeme'),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-      ),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-          child: Column(
-            children: [
-              Expanded(
-                child: SingleChildScrollView(
-                  child: GlassCard(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: const [
-                        Text(
-                          'Kahve Falı',
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
-                        ),
-                        SizedBox(height: 10),
-                        Text(
-                          'Fincanında kalan izler, sana özel bir hikâye anlatıyor.\n'
-                          'Şimdi bu hikâyeyi birlikte yorumlayalım.',
-                          style: TextStyle(height: 1.4),
-                        ),
-                        SizedBox(height: 14),
-                        Text(
-                          'Tutar: 49₺',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+      appBar: AppBar(title: const Text('Ödeme')),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: ListView(
+          children: [
+            GlassCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text('Kahve Falı', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                  SizedBox(height: 10),
+                  Text('Falını başlatmak için ödeme adımını tamamla.'),
+                  SizedBox(height: 12),
+                  Text('Tutar: 49₺', style: TextStyle(fontWeight: FontWeight.w800)),
+                ],
               ),
-              const SizedBox(height: 12),
-              GradientButton(
-                text: _loading ? 'İşleniyor...' : 'Falımı Başlat ✨',
-                onPressed: _loading ? null : _pay,
-              ),
-            ],
-          ),
+            ),
+            const SizedBox(height: 18),
+            GradientButton(
+              text: _loading ? 'İşleniyor...' : 'Ödemeyi Tamamla ✨',
+              onPressed: _loading ? null : _pay,
+            ),
+          ],
         ),
       ),
     );

@@ -5,7 +5,7 @@ import 'dart:io';
 import 'package:in_app_purchase/in_app_purchase.dart';
 
 import 'device_id_service.dart';
-import 'payment_api.dart';
+import 'purchase_api.dart';
 
 class IapService {
   IapService._();
@@ -124,7 +124,6 @@ class IapService {
       try {
         final platform = Platform.isIOS ? "app_store" : "google_play";
 
-        // transactionId fallback: purchaseID bazen null/boş gelebiliyor
         final rawTxn = (p.purchaseID ?? '').trim();
         final transactionId = rawTxn.isNotEmpty ? rawTxn : "TXN-${DateTime.now().millisecondsSinceEpoch}";
 
@@ -135,9 +134,8 @@ class IapService {
         String? receiptData;
 
         if (platform == "google_play") {
-          purchaseToken = _extractAndroidPurchaseToken(localData) ??
-              _extractAndroidPurchaseToken(serverData) ??
-              localData;
+          purchaseToken =
+              _extractAndroidPurchaseToken(localData) ?? _extractAndroidPurchaseToken(serverData) ?? localData;
 
           if ((purchaseToken ?? '').trim().length < 6) {
             throw Exception("Android purchaseToken alınamadı.");

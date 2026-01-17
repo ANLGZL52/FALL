@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../services/device_id_service.dart';
 import '../../services/iap_service.dart';
-import '../../services/payment_api.dart';
+import '../../services/purchase_api.dart' as store; // ✅ FIX: doğru dosya
 import '../../widgets/mystic_scaffold.dart';
 import 'synastry_generating_screen.dart';
 
@@ -28,12 +28,12 @@ class _SynastryPaymentScreenState extends State<SynastryPaymentScreen> {
   static const String _sku = "fall_synastry_149";
   static const bool debugUseStoreIap = false;
 
-  Future<PaymentVerifyResult> _debugStubVerify({
+  Future<store.PaymentVerifyResult> _debugStubVerify({
     required String deviceId,
     required String readingId,
     required String sku,
   }) async {
-    final intent = await PurchaseApi.createIntent(
+    final intent = await store.PurchaseApi.createIntent(
       deviceId: deviceId,
       readingId: readingId,
       sku: sku,
@@ -53,7 +53,7 @@ class _SynastryPaymentScreenState extends State<SynastryPaymentScreen> {
       receiptData = "DEV_RECEIPT_DATA_ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     }
 
-    return PurchaseApi.verify(
+    return store.PurchaseApi.verify(
       deviceId: deviceId,
       paymentId: intent.paymentId,
       sku: sku,
@@ -81,7 +81,7 @@ class _SynastryPaymentScreenState extends State<SynastryPaymentScreen> {
     try {
       final deviceId = await DeviceIdService.getOrCreate();
 
-      late final PaymentVerifyResult verify;
+      late final store.PaymentVerifyResult verify;
 
       if (kReleaseMode) {
         verify = await IapService.instance.buyAndVerify(

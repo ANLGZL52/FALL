@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../services/payment_api.dart';
+import '../../services/purchase_api.dart';
 import '../../services/hand_api.dart';
 import '../../services/device_id_service.dart';
 import '../../widgets/glass_card.dart';
@@ -31,25 +32,20 @@ class _HandPaymentScreenState extends State<HandPaymentScreen> {
   }
 
   Future<void> _payLegacyMock() async {
-    // 1) Payment start (mock) — bozulmasın
     final res = await PaymentApi.startPayment(
       readingId: widget.readingId,
       product: "hand",
-      // amount backend set ediyor ama istersek gönderilebilir:
-      // amount: _handPrice,
     );
 
     if (!res.ok) {
       throw Exception('Ödeme başarısız: ${res.provider}');
     }
 
-    // 2) Mark paid (legacy)
     await HandApi.markPaid(
       readingId: widget.readingId,
-      paymentRef: res.paymentId, // TEST-...
+      paymentRef: res.paymentId,
     );
 
-    // 3) Generate
     final reading = await HandApi.generate(readingId: widget.readingId);
     await _goResult(reading.id);
   }
@@ -57,20 +53,17 @@ class _HandPaymentScreenState extends State<HandPaymentScreen> {
   Future<void> _payStoreFlow() async {
     final deviceId = await DeviceIdService.getOrCreate();
 
-    // intent
     final intent = await PurchaseApi.createIntent(
       deviceId: deviceId,
       readingId: widget.readingId,
       sku: _handSku,
     );
 
-    // Debug stub purchase (IAP henüz bağlanmadı)
     final bool useMockPurchase = !kReleaseMode;
     final String platform = defaultTargetPlatform == TargetPlatform.iOS ? "app_store" : "google_play";
 
-    final String transactionId = useMockPurchase
-        ? "TXN-DEV-${DateTime.now().millisecondsSinceEpoch}"
-        : "TXN-REAL"; // TODO: IAP’den al
+    final String transactionId =
+        useMockPurchase ? "TXN-DEV-${DateTime.now().millisecondsSinceEpoch}" : "TXN-REAL";
 
     String? purchaseToken;
     String? receiptData;
@@ -85,7 +78,6 @@ class _HandPaymentScreenState extends State<HandPaymentScreen> {
       throw Exception("Store satın alma entegrasyonu (IAP) henüz bağlanmadı. Debug modda test edebilirsin.");
     }
 
-    // verify (server-side paid unlock)
     final verify = await PurchaseApi.verify(
       deviceId: deviceId,
       paymentId: intent.paymentId,
@@ -100,8 +92,6 @@ class _HandPaymentScreenState extends State<HandPaymentScreen> {
       throw Exception("Ödeme doğrulanamadı: ${verify.status}");
     }
 
-    // ✅ verify sonrası backend ilgili reading’i paid yaptı.
-    // hand/mark-paid çağırmuyoruz.
     final reading = await HandApi.generate(readingId: widget.readingId, deviceId: deviceId);
     await _goResult(reading.id);
   }
@@ -109,9 +99,6 @@ class _HandPaymentScreenState extends State<HandPaymentScreen> {
   Future<void> _payAndGenerate() async {
     setState(() => _loading = true);
     try {
-      // ✅ Şu an sistemi bozmamak için:
-      // - debug’da: legacy çalışsın
-      // - store flow test etmek için true yapabilirsin
       const bool debugTestStoreFlow = false;
 
       if (!kReleaseMode && debugTestStoreFlow) {
@@ -141,20 +128,11 @@ class _HandPaymentScreenState extends State<HandPaymentScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: const [
-                  Text(
-                    'El Falı',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-                  ),
+                  Text('El Falı', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
                   SizedBox(height: 10),
-                  Text(
-                    'Avucundaki çizgiler, karakterin ve yolun hakkında küçük ipuçları taşır.\n'
-                    'Şimdi bu ipuçlarını birlikte yorumlayalım.',
-                  ),
+                  Text('Avucundaki çizgiler, karakterin ve yolun hakkında küçük ipuçları taşır.\nŞimdi yorumlayalım.'),
                   SizedBox(height: 12),
-                  Text(
-                    'Tutar: 39₺',
-                    style: TextStyle(fontWeight: FontWeight.w800),
-                  ),
+                  Text('Tutar: 39₺', style: TextStyle(fontWeight: FontWeight.w800)),
                 ],
               ),
             ),

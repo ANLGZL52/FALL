@@ -8,9 +8,10 @@ class ProductCatalog {
   static const String personality399 = "fall_personality_399";
   static const String synastry149 = "fall_synastry_149";
 
-  static const String tarot3_149 = "fall_tarot_3_149";
-  static const String tarot6_199 = "fall_tarot_6_199";
-  static const String tarot12_250 = "fall_tarot_12_250";
+  // ✅ Tarot: Play Console’da hedeflediğin yeni ID’ler
+  static const String tarot3_149 = "tarot_3_card_149";
+  static const String tarot6_199 = "tarot_6_card_199";
+  static const String tarot12_250 = "tarot_12_card_250";
 
   static const Set<String> allSkus = {
     coffee49,
@@ -23,4 +24,7 @@ class ProductCatalog {
     tarot6_199,
     tarot12_250,
   };
+
+  // ✅ Eski kodlarda ProductCatalog.all kullanıldığı için uyumluluk:
+  static List<String> get all => allSkus.toList();
 }

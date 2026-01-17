@@ -36,8 +36,9 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
   bool _loading = false;
   String? _lastPaymentId;
 
-  // Debug’ta store test etmek istersen true yap
-  static const bool debugUseStoreIap = false;
+  // ✅ Gerçek telefonda DEBUG build ile store akışını test etmek için TRUE
+  // Release zaten store akışına geçiyor.
+  static const bool debugUseStoreIap = true;
 
   double get _amount {
     switch (widget.spreadType) {
@@ -53,11 +54,11 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
   String get _sku {
     switch (widget.spreadType) {
       case TarotSpreadType.three:
-        return ProductCatalog.tarot3_149;
+        return ProductCatalog.tarot3_149; // tarot_3_card_149
       case TarotSpreadType.six:
-        return ProductCatalog.tarot6_199;
+        return ProductCatalog.tarot6_199; // tarot_6_card_199
       case TarotSpreadType.twelve:
-        return ProductCatalog.tarot12_250;
+        return ProductCatalog.tarot12_250; // tarot_12_card_250
     }
   }
 
