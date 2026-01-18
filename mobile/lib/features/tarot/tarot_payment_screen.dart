@@ -1,7 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import '../../services/payment_api.dart';
 import '../../services/tarot_api.dart';
 import '../../services/device_id_service.dart';
 import '../../services/iap_service.dart';
@@ -36,6 +35,8 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
   bool _loading = false;
   String? _lastPaymentId;
 
+  // ✅ Gerçek telefonda DEBUG build ile store akışını test etmek için TRUE
+  // Release zaten store akışına geçiyor.
   static const bool debugUseStoreIap = true;
 
   double get _amount {
@@ -52,11 +53,11 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
   String get _sku {
     switch (widget.spreadType) {
       case TarotSpreadType.three:
-        return ProductCatalog.tarot3_149;
+        return ProductCatalog.tarot3_149; // tarot_3_card_149
       case TarotSpreadType.six:
-        return ProductCatalog.tarot6_199;
+        return ProductCatalog.tarot6_199; // tarot_6_card_199
       case TarotSpreadType.twelve:
-        return ProductCatalog.tarot12_250;
+        return ProductCatalog.tarot12_250; // tarot_12_card_250
     }
   }
 
@@ -82,8 +83,9 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
     }
   }
 
-  void _goProcessing() {
+  Future<void> _goProcessing() async {
     if (!mounted) return;
+
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => TarotProcessingScreen(
@@ -96,51 +98,24 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
     );
   }
 
-  Future<void> _payLegacyMock({required String deviceId}) async {
-    final res = await PaymentApi.startPayment(
-      readingId: widget.readingId,
-      amount: _amount,
-      product: "tarot",
-      deviceId: deviceId,
-    );
-
-    if (!res.ok) throw Exception('Ödeme başarısız: ${res.provider}');
-    _lastPaymentId = res.paymentId;
-
-    await TarotApi.markPaid(
-      readingId: widget.readingId,
-      paymentRef: res.paymentId,
-      deviceId: deviceId,
-    );
-
-    // ✅ sadece tetikle, bekleme
-    await TarotApi.generate(readingId: widget.readingId, deviceId: deviceId);
-
-    // ✅ hemen processing'e geç
-    _goProcessing();
-  }
-
   Future<void> _payStoreIap({required String deviceId}) async {
+    // 1) Store purchase + backend verify (IapService içinde)
     final verify = await IapService.instance.buyAndVerify(
       readingId: widget.readingId,
       sku: _sku,
     );
 
-    if (!verify.verified) throw Exception("Ödeme doğrulanamadı: ${verify.status}");
+    if (!verify.verified) {
+      throw Exception("Ödeme doğrulanamadı: ${verify.status}");
+    }
+
     _lastPaymentId = verify.paymentId;
 
-    // ✅ Çok kritik: backend kesin "paid" olmalı
-    await TarotApi.markPaid(
-      readingId: widget.readingId,
-      paymentRef: verify.paymentId,
-      deviceId: deviceId,
-    );
-
-    // ✅ sadece tetikle, bekleme
+    // 2) Generate'ı tetikle (hemen sonuç bekleme!)
     await TarotApi.generate(readingId: widget.readingId, deviceId: deviceId);
 
-    // ✅ hemen processing'e geç
-    _goProcessing();
+    // 3) Processing ekranına geç (poll ile completed bekle)
+    await _goProcessing();
   }
 
   Future<void> _payAndGenerate() async {
@@ -154,7 +129,11 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
         if (debugUseStoreIap) {
           await _payStoreIap(deviceId: deviceId);
         } else {
-          await _payLegacyMock(deviceId: deviceId);
+          // Debug'da store kullanmıyorsan da aynı mantık:
+          // ödeme doğrulandıktan sonra generate tetikle ve processing'e git.
+          // (legacy mock kullansan bile sonuç bekleme)
+          await TarotApi.generate(readingId: widget.readingId, deviceId: deviceId);
+          await _goProcessing();
         }
       }
     } catch (e) {
@@ -239,7 +218,7 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
             ),
             const SizedBox(height: 10),
             Text(
-              'Ödeme sonrası yorum hazırlanır ve sonuç ekranına otomatik geçersin.',
+              'Ödeme sonrası yorum hazırlanır ve sonuç ekranına otomatik yönlendirilirsin.',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white.withOpacity(0.70), fontSize: 12),
             ),
