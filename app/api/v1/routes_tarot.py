@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import uuid4
 import threading
+import traceback
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
@@ -26,54 +27,89 @@ router = APIRouter(prefix="/tarot", tags=["tarot"])
 def _run_generation_in_background(reading_id: str) -> None:
     """
     Long-running OpenAI call must NOT block the main worker thread.
-    We run it in a daemon thread to avoid Gunicorn worker timeout.
+    We run it in a daemon thread to avoid request timeouts.
+
+    NOTE:
+    - Thread still runs inside a Gunicorn worker process.
+    - If worker restarts/crashes, thread dies. So we MUST have logs to see failures.
     """
     from sqlmodel import Session as _Session
 
-    with _Session(engine) as session:
-        r = tarot_repo.get_reading(session, reading_id)
-        if not r:
-            return
+    print(f"[TAROT_BG] start reading_id={reading_id}")
 
-        # zaten completed ise üretme
-        if r.status == "completed" and (r.result_text or "").strip():
-            return
+    try:
+        with _Session(engine) as session:
+            r = tarot_repo.get_reading(session, reading_id)
+            if not r:
+                print(f"[TAROT_BG] not found reading_id={reading_id}")
+                return
 
-        # ödeme yoksa üretme
-        if not r.is_paid:
-            return
+            # zaten completed ise üretme
+            if r.status == "completed" and (r.result_text or "").strip():
+                print(f"[TAROT_BG] already completed reading_id={reading_id}")
+                return
 
-        # kart yoksa üretme
-        if not r.get_cards():
-            return
+            # ödeme yoksa üretme
+            if not r.is_paid:
+                print(f"[TAROT_BG] not paid reading_id={reading_id} status={r.status}")
+                return
 
-        # processing
-        r.status = "processing"
-        r.updated_at = datetime.utcnow()
-        r = tarot_repo.update_reading(session, r)
-
-        try:
+            # kart yoksa üretme
             cards = r.get_cards()
-            text = generate_tarot_reading(
-                name=r.name,
-                age=r.age,
-                topic=r.topic,
-                question=r.question,
-                spread_type=r.spread_type,
-                selected_cards=cards,
-            )
-            tarot_repo.set_status(session, reading_id, "completed", result_text=text)
-        except Exception:
-            # hata olursa paid'e geri al (retry mümkün)
-            tarot_repo.set_status(session, reading_id, "paid")
-            return
+            if not cards:
+                print(f"[TAROT_BG] no cards reading_id={reading_id}")
+                return
+
+            # processing
+            try:
+                r.status = "processing"
+                r.updated_at = datetime.utcnow()
+                tarot_repo.update_reading(session, r)
+                print(f"[TAROT_BG] set processing reading_id={reading_id}")
+            except Exception as e:
+                print(f"[TAROT_BG] failed set processing reading_id={reading_id} err={e}")
+                print(traceback.format_exc())
+                return
+
+            try:
+                print(f"[TAROT_BG] calling openai reading_id={reading_id} cards={cards}")
+
+                text = generate_tarot_reading(
+                    name=r.name,
+                    age=r.age,
+                    topic=r.topic,
+                    question=r.question,
+                    spread_type=r.spread_type,
+                    selected_cards=cards,
+                )
+
+                out_len = len((text or "").strip())
+                print(f"[TAROT_BG] openai ok reading_id={reading_id} len={out_len}")
+
+                tarot_repo.set_status(session, reading_id, "completed", result_text=text)
+                print(f"[TAROT_BG] saved completed reading_id={reading_id}")
+
+            except Exception as e:
+                print(f"[TAROT_BG] openai/db error reading_id={reading_id} err={e}")
+                print(traceback.format_exc())
+                # retry için paid'e dön
+                tarot_repo.set_status(session, reading_id, "paid")
+                print(f"[TAROT_BG] reverted to paid reading_id={reading_id}")
+                return
+
+    except Exception as e:
+        print(f"[TAROT_BG] fatal error reading_id={reading_id} err={e}")
+        print(traceback.format_exc())
+        return
 
 
 def _spawn_thread(reading_id: str) -> None:
+    print(f"[TAROT_BG] spawn thread reading_id={reading_id}")
     t = threading.Thread(
         target=_run_generation_in_background,
         args=(reading_id,),
         daemon=True,
+        name=f"tarot-gen-{reading_id[:8]}",
     )
     t.start()
 
@@ -164,6 +200,7 @@ async def mark_paid(reading_id: str, body: TarotMarkPaidRequest, session: Sessio
     if not r.get_cards():
         raise HTTPException(status_code=400, detail="Ödemeden önce kartlarını seçmelisin.")
 
+    # idempotent: tekrar çağrılsa da bozulmasın
     r.is_paid = True
     r.payment_ref = body.payment_ref.strip()
     r.status = "paid"
@@ -186,13 +223,15 @@ async def generate(reading_id: str, session: Session = Depends(get_session)):
     if r.status == "completed" and (r.result_text or "").strip():
         return _to_schema(r)
 
-    # processing'e çek
+    # processing'e çek (idempotent)
     if r.status != "processing":
         tarot_repo.set_status(session, reading_id, "processing")
 
-    # ✅ Thread ile üretimi başlat (worker bloklanmasın)
+    # thread ile üretimi başlat
+    print(f"[TAROT_API] generate called reading_id={reading_id} status={r.status}")
     _spawn_thread(reading_id)
 
+    # request hemen dönsün
     r = _get_or_404(session, reading_id)
     return _to_schema(r)
 
