@@ -4,7 +4,6 @@ from __future__ import annotations
 import base64
 import json
 import os
-from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import List, Dict, Any, Optional
 
@@ -26,7 +25,30 @@ def _require_key() -> str:
 
 
 def _make_client() -> OpenAI:
-    return OpenAI(api_key=_require_key())
+    """
+    ✅ Railway / prod ortamında uzun yanıt ve ağ gecikmelerinde kopmayı azaltır.
+    Env:
+      OPENAI_TIMEOUT_SECONDS=90
+      OPENAI_MAX_RETRIES=2
+    """
+    timeout = getattr(settings, "openai_timeout_seconds", 90)
+    max_retries = getattr(settings, "openai_max_retries", 2)
+
+    try:
+        timeout = int(timeout)
+    except Exception:
+        timeout = 90
+
+    try:
+        max_retries = int(max_retries)
+    except Exception:
+        max_retries = 2
+
+    return OpenAI(
+        api_key=_require_key(),
+        timeout=timeout,
+        max_retries=max_retries,
+    )
 
 
 def _text_model_name() -> str:
@@ -147,21 +169,19 @@ def _infer_spread_count(spread_type: str, selected_cards: List[str]) -> int:
 
 
 def _today_str_tr() -> str:
-    # UI’da “tarih bugüne ait değil” problemini kökten bitiriyoruz:
-    # prompt’a bugünün tarihini veriyoruz.
+    # UI’da “tarih bugüne ait değil” problemini prompt’ta kökten bitiriyoruz:
     return date.today().isoformat()
 
 
 def _next_14_days_lines_tr() -> str:
     """
-    14 günlük planı LLM'e net formatla verdiriyoruz:
-    model artık 2024 gibi saçmalık yazmasın.
+    14 günlük planı LLM'e net formatla verdiriyoruz.
+    Model artık 2024 gibi saçmalık yazmasın.
     """
     d0 = date.today()
     lines = []
     for i in range(14):
         di = d0 + timedelta(days=i)
-        # YYYY-MM-DD (Gün 1) formatı
         lines.append(f"- {di.isoformat()} (Gün {i+1}):")
     return "\n".join(lines)
 
@@ -534,7 +554,7 @@ Bu verilerle çok kapsamlı ve derin bir numeroloji analizi yaz.
 
 
 # ============================================================
-# BirthChart (text-only) ✅ GÜÇLENDİRİLDİ
+# BirthChart (text-only)
 # ============================================================
 
 def generate_birthchart_reading(

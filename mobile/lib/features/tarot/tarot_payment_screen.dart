@@ -12,7 +12,7 @@ import '../../widgets/gradient_button.dart';
 import '../../widgets/mystic_scaffold.dart';
 
 import 'tarot_models.dart';
-import 'tarot_result_screen.dart';
+import 'tarot_processing_screen.dart';
 
 class TarotPaymentScreen extends StatefulWidget {
   final String readingId;
@@ -36,8 +36,6 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
   bool _loading = false;
   String? _lastPaymentId;
 
-  // ✅ Gerçek telefonda DEBUG build ile store akışını test etmek için TRUE
-  // Release zaten store akışına geçiyor.
   static const bool debugUseStoreIap = true;
 
   double get _amount {
@@ -54,11 +52,11 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
   String get _sku {
     switch (widget.spreadType) {
       case TarotSpreadType.three:
-        return ProductCatalog.tarot3_149; // tarot_3_card_149
+        return ProductCatalog.tarot3_149;
       case TarotSpreadType.six:
-        return ProductCatalog.tarot6_199; // tarot_6_card_199
+        return ProductCatalog.tarot6_199;
       case TarotSpreadType.twelve:
-        return ProductCatalog.tarot12_250; // tarot_12_card_250
+        return ProductCatalog.tarot12_250;
     }
   }
 
@@ -84,15 +82,15 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
     }
   }
 
-  Future<void> _goResult(String resultText) async {
+  void _goProcessing() {
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
-        builder: (_) => TarotResultScreen(
+        builder: (_) => TarotProcessingScreen(
+          readingId: widget.readingId,
           question: widget.question,
           spreadType: widget.spreadType,
           selectedCards: widget.selectedCards,
-          resultText: resultText,
         ),
       ),
     );
@@ -115,15 +113,11 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
       deviceId: deviceId,
     );
 
-    final gen = await TarotApi.generate(
-      readingId: widget.readingId,
-      deviceId: deviceId,
-    );
+    // ✅ sadece tetikle, bekleme
+    await TarotApi.generate(readingId: widget.readingId, deviceId: deviceId);
 
-    final resultText = (gen["result_text"] ?? "").toString().trim();
-    if (resultText.isEmpty) throw Exception("Yorum oluşturulamadı.");
-
-    await _goResult(resultText);
+    // ✅ hemen processing'e geç
+    _goProcessing();
   }
 
   Future<void> _payStoreIap({required String deviceId}) async {
@@ -135,15 +129,18 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
     if (!verify.verified) throw Exception("Ödeme doğrulanamadı: ${verify.status}");
     _lastPaymentId = verify.paymentId;
 
-    final gen = await TarotApi.generate(
+    // ✅ Çok kritik: backend kesin "paid" olmalı
+    await TarotApi.markPaid(
       readingId: widget.readingId,
+      paymentRef: verify.paymentId,
       deviceId: deviceId,
     );
 
-    final resultText = (gen["result_text"] ?? "").toString().trim();
-    if (resultText.isEmpty) throw Exception("Yorum oluşturulamadı.");
+    // ✅ sadece tetikle, bekleme
+    await TarotApi.generate(readingId: widget.readingId, deviceId: deviceId);
 
-    await _goResult(resultText);
+    // ✅ hemen processing'e geç
+    _goProcessing();
   }
 
   Future<void> _payAndGenerate() async {
@@ -242,7 +239,7 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
             ),
             const SizedBox(height: 10),
             Text(
-              'Ödeme sonrası yorum oluşturulur ve sonuç ekranına yönlendirilirsin.',
+              'Ödeme sonrası yorum hazırlanır ve sonuç ekranına otomatik geçersin.',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white.withOpacity(0.70), fontSize: 12),
             ),
