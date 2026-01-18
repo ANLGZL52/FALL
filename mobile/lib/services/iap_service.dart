@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:in_app_purchase/in_app_purchase.dart';
+import 'package:in_app_purchase_android/in_app_purchase_android.dart';
 
 import 'device_id_service.dart';
 import 'purchase_api.dart';
@@ -124,35 +125,85 @@ class IapService {
       try {
         final platform = Platform.isIOS ? "app_store" : "google_play";
 
-        final rawTxn = (p.purchaseID ?? '').trim();
-        final transactionId = rawTxn.isNotEmpty ? rawTxn : "TXN-${DateTime.now().millisecondsSinceEpoch}";
-
-        final localData = p.verificationData.localVerificationData;
-        final serverData = p.verificationData.serverVerificationData;
-
+        String? transactionId;
         String? purchaseToken;
         String? receiptData;
 
+        // -------------------------
+        // ANDROID (Google Play)
+        // -------------------------
         if (platform == "google_play") {
-          purchaseToken =
-              _extractAndroidPurchaseToken(localData) ?? _extractAndroidPurchaseToken(serverData) ?? localData;
+          // ✅ En güvenilir kaynak: GooglePlayPurchaseDetails -> billingClientPurchase
+          if (p is GooglePlayPurchaseDetails) {
+            final orderId = (p.billingClientPurchase.orderId ?? '').trim();
+            final token = (p.billingClientPurchase.purchaseToken ?? '').trim();
+            final purchaseTime = p.billingClientPurchase.purchaseTime ?? 0;
+
+            if (token.isNotEmpty) {
+              purchaseToken = token;
+            }
+
+            // ✅ transaction_id: orderId varsa direkt kullan
+            if (orderId.isNotEmpty) {
+              transactionId = orderId;
+            } else if (token.isNotEmpty) {
+              // orderId boşsa token + time ile stabil bir id üret (random değil)
+              final head = token.substring(0, token.length >= 16 ? 16 : token.length);
+              transactionId = "GP-$head-$purchaseTime";
+            }
+          }
+
+          // Fallback: verificationData
+          final localData = (p.verificationData.localVerificationData).trim();
+          final serverData = (p.verificationData.serverVerificationData).trim();
+
+          purchaseToken ??= _extractAndroidPurchaseToken(localData) ??
+              _extractAndroidPurchaseToken(serverData) ??
+              (serverData.length >= 6 ? serverData : null) ??
+              (localData.length >= 6 ? localData : null);
+
+          transactionId ??= (p.purchaseID ?? '').trim();
+
+          // son fallback: stabil üret (random yok)
+          if ((transactionId ?? '').isEmpty) {
+            final dt = (p.transactionDate ?? DateTime.now().millisecondsSinceEpoch.toString()).trim();
+            transactionId = "TXN-${p.productID}-$dt";
+          }
 
           if ((purchaseToken ?? '').trim().length < 6) {
             throw Exception("Android purchaseToken alınamadı.");
           }
-        } else {
-          receiptData = (serverData.trim().length >= 20) ? serverData : localData;
-          if (receiptData.trim().length < 20) {
+          if ((transactionId ?? '').trim().length < 3) {
+            throw Exception("Android transactionId alınamadı.");
+          }
+        }
+
+        // -------------------------
+        // IOS (App Store)
+        // -------------------------
+        else {
+          final serverData = (p.verificationData.serverVerificationData).trim();
+          final localData = (p.verificationData.localVerificationData).trim();
+
+          receiptData = (serverData.length >= 20) ? serverData : localData;
+
+          transactionId = (p.purchaseID ?? '').trim();
+          if (transactionId.isEmpty) {
+            transactionId = "IOS-${DateTime.now().millisecondsSinceEpoch}";
+          }
+
+          if ((receiptData ?? '').trim().length < 20) {
             throw Exception("iOS receiptData alınamadı.");
           }
         }
 
+        // ✅ Backend verify
         final res = await PurchaseApi.verify(
           deviceId: deviceId,
           paymentId: _activePaymentId!,
           sku: _activeSku!,
           platform: platform,
-          transactionId: transactionId,
+          transactionId: transactionId!,
           purchaseToken: purchaseToken,
           receiptData: receiptData,
         );
@@ -162,6 +213,7 @@ class IapService {
           return;
         }
 
+        // ✅ completePurchase
         if (p.pendingCompletePurchase) {
           await _iap.completePurchase(p);
         }

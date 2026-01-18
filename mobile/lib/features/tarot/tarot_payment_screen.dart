@@ -1,10 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import '../../services/tarot_api.dart';
 import '../../services/device_id_service.dart';
 import '../../services/iap_service.dart';
 import '../../services/product_catalog.dart';
+import '../../services/tarot_api.dart';
 
 import '../../widgets/glass_card.dart';
 import '../../widgets/gradient_button.dart';
@@ -53,11 +53,11 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
   String get _sku {
     switch (widget.spreadType) {
       case TarotSpreadType.three:
-        return ProductCatalog.tarot3_149; // tarot_3_card_149
+        return ProductCatalog.tarot3_149;
       case TarotSpreadType.six:
-        return ProductCatalog.tarot6_199; // tarot_6_card_199
+        return ProductCatalog.tarot6_199;
       case TarotSpreadType.twelve:
-        return ProductCatalog.tarot12_250; // tarot_12_card_250
+        return ProductCatalog.tarot12_250;
     }
   }
 
@@ -98,7 +98,9 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
     );
   }
 
-  Future<void> _payStoreIap({required String deviceId}) async {
+  Future<void> _payStoreIap() async {
+    final deviceId = await DeviceIdService.getOrCreate();
+
     // 1) Store purchase + backend verify (IapService içinde)
     final verify = await IapService.instance.buyAndVerify(
       readingId: widget.readingId,
@@ -111,28 +113,37 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
 
     _lastPaymentId = verify.paymentId;
 
-    // 2) Generate'ı tetikle (hemen sonuç bekleme!)
-    await TarotApi.generate(readingId: widget.readingId, deviceId: deviceId);
+    // ✅ ÖNEMLİ:
+    // Burada generate çağırmıyoruz.
+    // Processing ekranı "paid" gördüğünde 1 kez generate tetikleyecek (idempotent).
+    // Böylece verify/DB timing edge-case’leri yüzünden generate’in boşa düşmesini engelliyoruz.
 
-    // 3) Processing ekranına geç (poll ile completed bekle)
+    // (Debug amaçlı bilgi)
+    if (!kReleaseMode) {
+      try {
+        final d = await TarotApi.detail(readingId: widget.readingId, deviceId: deviceId);
+        final st = (d['status'] ?? '').toString();
+        final paid = (d['is_paid'] ?? false).toString();
+        // ignore: avoid_print
+        print('[TAROT_PAYMENT] after verify detail status=$st is_paid=$paid paymentId=${verify.paymentId}');
+      } catch (_) {}
+    }
+
+    // 2) Processing ekranına geç (poll + controlled generate)
     await _goProcessing();
   }
 
-  Future<void> _payAndGenerate() async {
+  Future<void> _payAndContinue() async {
     setState(() => _loading = true);
     try {
-      final deviceId = await DeviceIdService.getOrCreate();
-
       if (kReleaseMode) {
-        await _payStoreIap(deviceId: deviceId);
+        await _payStoreIap();
       } else {
         if (debugUseStoreIap) {
-          await _payStoreIap(deviceId: deviceId);
+          await _payStoreIap();
         } else {
-          // Debug'da store kullanmıyorsan da aynı mantık:
-          // ödeme doğrulandıktan sonra generate tetikle ve processing'e git.
-          // (legacy mock kullansan bile sonuç bekleme)
-          await TarotApi.generate(readingId: widget.readingId, deviceId: deviceId);
+          // Debug'da store kullanmıyorsan:
+          // Direct processing ekranına geç (Processing gerekirse generate’i tetikler)
           await _goProcessing();
         }
       }
@@ -214,7 +225,7 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
             const SizedBox(height: 12),
             GradientButton(
               text: _loading ? 'İşleniyor...' : 'Ödemeyi Başlat ve Yorumu Gör',
-              onPressed: _loading ? null : _payAndGenerate,
+              onPressed: _loading ? null : _payAndContinue,
             ),
             const SizedBox(height: 10),
             Text(
