@@ -22,6 +22,17 @@ router = APIRouter(
 )
 
 
+@router.get("/{reading_id}")
+def get_personality(
+    reading_id: str,
+    session: Session = Depends(get_session),
+):
+    reading = personality_repo.get(session=session, reading_id=reading_id)
+    if not reading:
+        raise HTTPException(status_code=404, detail="Reading not found")
+    return reading
+
+
 @router.post("/start")
 def start_personality(
     payload: PersonalityStartRequest,
@@ -51,7 +62,7 @@ def mark_paid(
 ):
     """
     ✅ Legacy/mock akış bozulmasın diye endpoint duruyor.
-    🔒 Ama güvenlik için sadece TEST-... (mock) ödeme ref ile çalışır.
+    🔒 Sadece TEST-... (mock) ödeme ref ile çalışır.
     Real ödeme: /payments/verify server-side mark_paid yapar.
     """
     payment_ref = payload.payment_ref if payload else None
@@ -84,9 +95,19 @@ def generate_personality(
     if not reading:
         raise HTTPException(status_code=404, detail="Reading not found")
 
+    # 🔒 ödeme zorunlu
     if not reading.get("is_paid"):
         raise HTTPException(status_code=402, detail="Payment Required")
 
+    # ✅ idempotent: sonuç varsa direkt dön
+    if (reading.get("status") in ("completed", "done")) and reading.get("result_text"):
+        return reading
+
+    # ✅ idempotent: processing ise tekrar üretme, mevcut state'i dön
+    if reading.get("status") == "processing":
+        return reading
+
+    # burada status paid/started gibi bir şeyse production'a giriyoruz
     personality_repo.set_status(
         session=session,
         reading_id=reading_id,
@@ -112,6 +133,7 @@ def generate_personality(
         return updated
 
     except Exception as e:
+        # başarısızsa tekrar "paid" durumuna çek
         personality_repo.set_status(
             session=session,
             reading_id=reading_id,
@@ -167,7 +189,5 @@ def download_personality_pdf(
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

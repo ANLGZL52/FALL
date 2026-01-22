@@ -1,7 +1,8 @@
+# app/repositories/synastry_repo.py
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 
 from sqlmodel import Session, select
 
@@ -54,23 +55,68 @@ class SynastryRepo:
         row = session.exec(stmt).first()
         return row.model_dump() if row else None
 
-    def mark_paid(self, *, session: Session, reading_id: str, payment_ref: Optional[str]) -> Optional[Dict[str, Any]]:
+    def _get_row(self, *, session: Session, reading_id: str) -> Optional[SynastryReadingDB]:
         stmt = select(SynastryReadingDB).where(SynastryReadingDB.reading_id == reading_id)
-        row = session.exec(stmt).first()
+        return session.exec(stmt).first()
+
+    def mark_paid(self, *, session: Session, reading_id: str, payment_ref: Optional[str]) -> Optional[Dict[str, Any]]:
+        row = self._get_row(session=session, reading_id=reading_id)
         if not row:
             return None
+
+        # ✅ idempotent: zaten paid ise tekrar çağrı zarar vermesin
         row.is_paid = True
         row.payment_ref = payment_ref
         row.status = "paid"
         row.updated_at = datetime.utcnow()
+
         session.add(row)
         session.commit()
         session.refresh(row)
         return row.model_dump()
 
+    def claim_processing(self, *, session: Session, reading_id: str) -> Tuple[Optional[Dict[str, Any]], bool]:
+        """
+        ✅ Generate için kilit noktası:
+        - Eğer DONE ise: claimed=False, mevcut kaydı döndür.
+        - Eğer PROCESSING ise: claimed=False, mevcut kaydı döndür.
+        - Eğer PAID ise: status'u PROCESSING yapıp claimed=True döndür.
+        - Eğer ödeme yoksa: claimed=False, mevcut kaydı döndür (route 402 verir).
+        """
+        row = self._get_row(session=session, reading_id=reading_id)
+        if not row:
+            return None, False
+
+        # sonuç zaten varsa tekrar üretme
+        if (row.result_text or "").strip():
+            if row.status != "done":
+                row.status = "done"
+                row.updated_at = datetime.utcnow()
+                session.add(row)
+                session.commit()
+                session.refresh(row)
+            return row.model_dump(), False
+
+        st = (row.status or "").lower().strip()
+
+        # processing durumunda tekrar tetikleme yok
+        if st == "processing":
+            return row.model_dump(), False
+
+        # paid -> processing only
+        if row.is_paid and st in ("paid", "started", ""):
+            row.status = "processing"
+            row.updated_at = datetime.utcnow()
+            session.add(row)
+            session.commit()
+            session.refresh(row)
+            return row.model_dump(), True
+
+        # ödeme yoksa route zaten 402 basacak
+        return row.model_dump(), False
+
     def set_status(self, *, session: Session, reading_id: str, status: str) -> Optional[Dict[str, Any]]:
-        stmt = select(SynastryReadingDB).where(SynastryReadingDB.reading_id == reading_id)
-        row = session.exec(stmt).first()
+        row = self._get_row(session=session, reading_id=reading_id)
         if not row:
             return None
         row.status = status
@@ -81,8 +127,7 @@ class SynastryRepo:
         return row.model_dump()
 
     def set_result(self, *, session: Session, reading_id: str, result_text: str) -> Optional[Dict[str, Any]]:
-        stmt = select(SynastryReadingDB).where(SynastryReadingDB.reading_id == reading_id)
-        row = session.exec(stmt).first()
+        row = self._get_row(session=session, reading_id=reading_id)
         if not row:
             return None
         row.result_text = result_text
@@ -94,8 +139,7 @@ class SynastryRepo:
         return row.model_dump()
 
     def set_rating(self, *, session: Session, reading_id: str, rating: int) -> Optional[Dict[str, Any]]:
-        stmt = select(SynastryReadingDB).where(SynastryReadingDB.reading_id == reading_id)
-        row = session.exec(stmt).first()
+        row = self._get_row(session=session, reading_id=reading_id)
         if not row:
             return None
         row.rating = rating

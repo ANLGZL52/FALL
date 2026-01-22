@@ -1,18 +1,17 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 
-import 'package:lunaura/widgets/mystic_scaffold.dart';
-import 'package:lunaura/services/personality_api.dart';
-import 'package:lunaura/services/device_id_service.dart';
+import '../../services/device_id_service.dart';
+import '../../services/personality_api.dart';
+import '../../widgets/mystic_scaffold.dart';
 import 'personality_result_screen.dart';
 
 class PersonalityGeneratingScreen extends StatefulWidget {
   final String readingId;
-  final String name;
 
   const PersonalityGeneratingScreen({
     super.key,
     required this.readingId,
-    required this.name,
   });
 
   @override
@@ -20,135 +19,156 @@ class PersonalityGeneratingScreen extends StatefulWidget {
 }
 
 class _PersonalityGeneratingScreenState extends State<PersonalityGeneratingScreen> {
-  bool _started = false;
+  bool _running = false;
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (!_started) {
-      _started = true;
-      _run();
+  void initState() {
+    super.initState();
+    _run();
+  }
+
+  bool _isHttp(Object e, int code) {
+    final s = e.toString();
+    return s.contains(' $code ') || s.contains('$code /') || s.contains(':$code');
+  }
+
+  String _prettyError(Object e) {
+    final s = e.toString();
+
+    if (_isHttp(e, 402)) {
+      return "Ödeme doğrulaması henüz sisteme yansımadı.\n\n"
+          "Birazdan otomatik tekrar deneyeceğim…";
     }
+
+    if (_isHttp(e, 409)) {
+      return "İşlem çakıştı / sonuç hazır değil.\n\n"
+          "Tekrar deniyorum…";
+    }
+
+    if (s.toLowerCase().contains('timeout') || s.contains('zaman a')) {
+      return "İşlem çok uzadı ve zaman aşımına uğradı.\n\n"
+          "İnternetini kontrol et ve tekrar dene.";
+    }
+
+    return "Bir hata oluştu:\n$s";
   }
 
   Future<void> _run() async {
-    try {
-      final deviceId = await DeviceIdService.getOrCreate();
+    if (_running) return;
+    _running = true;
 
-      final generated = await PersonalityApi.generate(
-        readingId: widget.readingId,
-        deviceId: deviceId,
-      );
+    final deviceId = await DeviceIdService.getOrCreate();
 
-      if (!mounted) return;
+    // ✅ 402/409 gibi timing durumları için kontrollü retry
+    const maxTry = 6;           // toplam deneme
+    const baseDelayMs = 900;    // ilk bekleme
 
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => PersonalityResultScreen(
-            readingId: generated.id,
-            title: "Kişilik Analizi",
-            resultText: generated.resultText ?? "",
-          ),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Hata: $e"), behavior: SnackBarBehavior.floating),
-      );
-      Navigator.of(context).pop();
+    for (var i = 1; i <= maxTry; i++) {
+      try {
+        final reading = await PersonalityApi.generate(
+          readingId: widget.readingId,
+          deviceId: deviceId,
+        );
+
+        if (!mounted) return;
+
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => PersonalityResultScreen(reading: reading)),
+          (route) => false,
+        );
+        return;
+      } catch (e) {
+        if (!mounted) return;
+
+        final isRetryable = _isHttp(e, 402) || _isHttp(e, 409);
+
+        if (isRetryable && i < maxTry) {
+          // kullanıcıya hafif bilgi ver (spam yok)
+          if (i == 1 || i == 3) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(_prettyError(e)), behavior: SnackBarBehavior.floating),
+            );
+          }
+
+          // artan backoff
+          final wait = Duration(milliseconds: baseDelayMs * i);
+          await Future.delayed(wait);
+          continue;
+        }
+
+        // retry bitince veya retryable değilse
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_prettyError(e)), behavior: SnackBarBehavior.floating),
+        );
+        Navigator.of(context).pop();
+        return;
+      }
     }
+
+    _running = false;
   }
 
   @override
   Widget build(BuildContext context) {
     return MysticScaffold(
-      scrimOpacity: 0.62,
-      patternOpacity: 0.22,
+      scrimOpacity: 0.72,
+      patternOpacity: 0.18,
       body: SafeArea(
         child: Column(
           children: [
-            const SizedBox(height: 10),
+            const SizedBox(height: 14),
             Row(
               children: const [
-                SizedBox(width: 52),
-                Expanded(
-                  child: Text(
-                    "Kişilik Analizi",
-                    style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900),
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                  ),
+                SizedBox(width: 16),
+                Icon(Icons.auto_awesome, color: Colors.white),
+                SizedBox(width: 10),
+                Text(
+                  "Analiz Oluşturuluyor",
+                  style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900),
                 ),
-                SizedBox(width: 52),
               ],
             ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: Center(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 18),
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.42),
-                      borderRadius: BorderRadius.circular(22),
-                      border: Border.all(color: Colors.white12),
+            const Spacer(),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 18),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "Kişilik analizin hazırlanıyor...",
+                      style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w900),
                     ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const SizedBox(height: 6),
-                        const Icon(Icons.auto_awesome, color: Color(0xFFF5C361), size: 28),
-                        const SizedBox(height: 12),
-                        Text(
-                          "${widget.name} için analiz hazırlanıyor…",
-                          style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w900),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          "Bu işlem birkaç saniye sürebilir. Lütfen ekranı kapatma.",
-                          style: TextStyle(color: Colors.white70, height: 1.25),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 18),
-                        const SizedBox(
-                          height: 26,
-                          width: 26,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                        const SizedBox(height: 14),
-                        _hint("Karakter çekirdeği, ilişki dili ve kariyer temaları harmanlanıyor"),
-                        _hint("Yakın dönem öneriler ve mini plan hazırlanıyor"),
-                      ],
+                    const SizedBox(height: 10),
+                    Text(
+                      "Semboller ve temalar birleştiriliyor…\n"
+                      "Kişilik çekirdeği netleştiriliyor…\n"
+                      "Birazdan hazır.",
+                      style: TextStyle(color: Colors.white.withOpacity(0.80), height: 1.35),
                     ),
-                  ),
+                    const SizedBox(height: 16),
+                    const Center(
+                      child: SizedBox(
+                        height: 28,
+                        width: 28,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
-            const SizedBox(height: 18),
+            const Spacer(),
+            const SizedBox(height: 26),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _hint(String t) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: Row(
-        children: [
-          const Icon(Icons.circle, size: 6, color: Colors.white38),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              t,
-              style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.25),
-            ),
-          ),
-        ],
       ),
     );
   }

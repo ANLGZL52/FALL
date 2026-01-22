@@ -15,70 +15,130 @@ String _extractErrorMessage(String body) {
   return body;
 }
 
-/// ===============================
-/// LEGACY START (bozulmasın)
-/// POST /payments/start
-/// ===============================
-
-class StartPaymentResult {
-  final bool ok;
+class NumerologyReading {
+  final String id;
+  final String topic;
+  final String? question;
+  final String name;
+  final String birthDate;
   final String status;
-  final String provider;
-  final String paymentId;
-  final String product;
-  final String readingId;
-  final double amount;
+  final String? resultText;
+  final bool isPaid;
+  final String? paymentRef;
 
-  StartPaymentResult({
-    required this.ok,
+  NumerologyReading({
+    required this.id,
+    required this.topic,
+    required this.question,
+    required this.name,
+    required this.birthDate,
     required this.status,
-    required this.provider,
-    required this.paymentId,
-    required this.product,
-    required this.readingId,
-    required this.amount,
+    required this.resultText,
+    required this.isPaid,
+    required this.paymentRef,
   });
 
-  factory StartPaymentResult.fromJson(Map<String, dynamic> j) {
-    final pid = (j['payment_id'] ?? j['paymentId'] ?? j['payment_ref'] ?? j['paymentRef'] ?? '').toString();
-    final okVal = j.containsKey('ok') ? j['ok'] : true;
-    final ok = okVal is bool ? okVal : (okVal.toString().toLowerCase() == 'true');
-
-    return StartPaymentResult(
-      ok: ok,
-      status: (j['status'] ?? 'success').toString(),
-      provider: (j['provider'] ?? 'mock').toString(),
-      paymentId: pid,
-      product: (j['product'] ?? j['product_type'] ?? j['productType'] ?? '').toString(),
-      readingId: (j['reading_id'] ?? j['readingId'] ?? '').toString(),
-      amount: (j['amount'] is num) ? (j['amount'] as num).toDouble() : double.tryParse('${j['amount']}') ?? 0.0,
+  factory NumerologyReading.fromJson(Map<String, dynamic> j) {
+    return NumerologyReading(
+      id: (j["id"] ?? "").toString(),
+      topic: (j["topic"] ?? "genel").toString(),
+      question: j["question"]?.toString(),
+      name: (j["name"] ?? "").toString(),
+      birthDate: (j["birth_date"] ?? "").toString(),
+      status: (j["status"] ?? "").toString(),
+      resultText: j["result_text"]?.toString(),
+      isPaid: (j["is_paid"] ?? false) == true,
+      paymentRef: j["payment_ref"]?.toString(),
     );
   }
 }
 
-class PaymentApi {
-  static Future<StartPaymentResult> startPayment({
-    required String readingId,
-    double? amount,
-    required String product,
+class NumerologyApi {
+  static Uri _u(String path) => Uri.parse('${ApiBase.baseUrl}$path');
+
+  static const Duration _defaultTimeout = Duration(seconds: 30);
+  static const Duration _generateTimeout = Duration(seconds: 150);
+
+  static Future<NumerologyReading> start({
+    required String name,
+    required String birthDate, // YYYY-MM-DD
+    required String topic,
+    String? question,
     String? deviceId,
   }) async {
-    final url = Uri.parse('${ApiBase.baseUrl}/payments/start');
-
-    final body = <String, dynamic>{
-      "reading_id": readingId,
-      "product": product,
-    };
-    if (amount != null) body["amount"] = amount;
+    final q = (question ?? '').trim();
 
     final res = await http
-        .post(url, headers: ApiBase.headers(deviceId: deviceId), body: jsonEncode(body))
-        .timeout(const Duration(seconds: 30));
+        .post(
+          _u('/numerology/start'),
+          headers: ApiBase.headers(deviceId: deviceId),
+          body: jsonEncode({
+            "name": name,
+            "birth_date": birthDate,
+            "topic": topic,
+            "question": q.isEmpty ? null : q,
+          }),
+        )
+        .timeout(_defaultTimeout);
 
-    if (res.statusCode >= 400) {
-      throw Exception('payments/start failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
+    if (res.statusCode != 200) {
+      throw Exception("numerology/start failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}");
     }
 
-    return StartPaymentResult.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+    return NumerologyReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
+
+  /// LEGACY (mock) için kalsın.
+  static Future<NumerologyReading> markPaid({
+    required String readingId,
+    String? paymentRef,
+    String? deviceId,
+  }) async {
+    final ref = (paymentRef ?? '').trim();
+    if (ref.isNotEmpty && !ref.startsWith("TEST-")) {
+      throw Exception("markPaid legacy only. Real payments use /payments/verify.");
+    }
+
+    final res = await http
+        .post(
+          _u('/numerology/$readingId/mark-paid'),
+          headers: ApiBase.headers(deviceId: deviceId),
+          body: jsonEncode({"payment_ref": paymentRef}),
+        )
+        .timeout(_defaultTimeout);
+
+    if (res.statusCode != 200) {
+      throw Exception("numerology/mark-paid failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}");
+    }
+
+    return NumerologyReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
+
+  static Future<NumerologyReading> generate({
+    required String readingId,
+    String? deviceId,
+  }) async {
+    final res = await http
+        .post(
+          _u('/numerology/$readingId/generate'),
+          headers: ApiBase.headers(deviceId: deviceId),
+        )
+        .timeout(_generateTimeout);
+
+    if (res.statusCode != 200) {
+      throw Exception("numerology/generate failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}");
+    }
+
+    return NumerologyReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
+
+  static Future<String> generateText({
+    required String readingId,
+    String? deviceId,
+  }) async {
+    final r = await generate(readingId: readingId, deviceId: deviceId);
+    final t = (r.resultText ?? '').trim();
+    if (t.isEmpty) throw Exception("generateText: result_text empty");
+    return t;
   }
 }

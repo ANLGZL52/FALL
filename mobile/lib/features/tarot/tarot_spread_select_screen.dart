@@ -122,9 +122,32 @@ class _TarotSpreadSelectScreenState extends State<TarotSpreadSelectScreen> {
                     ),
                   ),
                   const SizedBox(height: 14),
-                  Text(
-                    'Paket ücreti: ${price.toStringAsFixed(0)} ₺',
-                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Paket ücreti: ${price.toStringAsFixed(0)} ₺',
+                        style: const TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        "+ vergiler",
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.78),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        "Vergiler Google Play tarafından ödeme sırasında eklenir.",
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.70),
+                          fontSize: 12,
+                          height: 1.2,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),

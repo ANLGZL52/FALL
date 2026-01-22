@@ -28,6 +28,11 @@ class _NumerologyLoadingScreenState extends State<NumerologyLoadingScreen> {
     _run();
   }
 
+  bool _isHttp(Object e, int code) {
+    final s = e.toString();
+    return s.contains(' $code ') || s.contains('$code /') || s.contains(':$code');
+  }
+
   Future<void> _run() async {
     try {
       Future.delayed(const Duration(milliseconds: 600), () {
@@ -39,10 +44,28 @@ class _NumerologyLoadingScreenState extends State<NumerologyLoadingScreen> {
 
       final deviceId = await DeviceIdService.getOrCreate();
 
-      final generated = await NumerologyApi.generate(
-        readingId: widget.readingId,
-        deviceId: deviceId,
-      );
+      // ✅ generate için retry/backoff (ödeme işareti DB’de gecikirse)
+      const maxTry = 6;
+      const baseDelayMs = 900;
+
+      late final generated;
+      for (var i = 1; i <= maxTry; i++) {
+        try {
+          generated = await NumerologyApi.generate(
+            readingId: widget.readingId,
+            deviceId: deviceId,
+          );
+          break;
+        } catch (e) {
+          // backend tarafında birazdan 402 yapacağız; şimdilik 400 de retry olsun.
+          final retryable = _isHttp(e, 400) || _isHttp(e, 402) || _isHttp(e, 409);
+          if (retryable && i < maxTry) {
+            await Future.delayed(Duration(milliseconds: baseDelayMs * i));
+            continue;
+          }
+          rethrow;
+        }
+      }
 
       if (!mounted) return;
       Navigator.of(context).pushReplacement(

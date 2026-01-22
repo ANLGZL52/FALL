@@ -63,6 +63,8 @@ class NumerologyApi {
     String? question,
     String? deviceId,
   }) async {
+    final q = (question ?? '').trim();
+
     final res = await http.post(
       _u('/numerology/start'),
       headers: ApiBase.headers(deviceId: deviceId),
@@ -70,7 +72,7 @@ class NumerologyApi {
         "name": name,
         "birth_date": birthDate,
         "topic": topic,
-        "question": question,
+        "question": q.isEmpty ? null : q,
       }),
     );
 

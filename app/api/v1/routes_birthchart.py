@@ -54,6 +54,12 @@ def mark_paid(reading_id: str, payload: Dict[str, Any] | None = None, session: S
     if not reading:
         raise HTTPException(status_code=404, detail="Reading not found")
     return reading
+@router.get("/{reading_id}")
+def detail(reading_id: str, session: Session = Depends(get_session)):
+    reading = birthchart_repo.get(session=session, reading_id=reading_id)
+    if not reading:
+        raise HTTPException(status_code=404, detail="Reading not found")
+    return reading
 
 
 @router.post("/{reading_id}/generate")

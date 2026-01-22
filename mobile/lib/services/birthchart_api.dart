@@ -19,29 +19,34 @@ String _extractErrorMessage(String body) {
 class BirthChartApi {
   static Uri _u(String path) => Uri.parse('${ApiBase.baseUrl}$path');
 
+  static const Duration _defaultTimeout = Duration(seconds: 30);
+  static const Duration _generateTimeout = Duration(seconds: 150);
+
   static Future<BirthChartReading> start({
     required String name,
-    required String birthDate, // YYYY-MM-DD
-    String? birthTime, // HH:MM (opsiyonel)
+    required String birthDate,
+    String? birthTime,
     required String birthCity,
     String birthCountry = "TR",
     String topic = "genel",
     String? question,
-    String? deviceId, // ✅ opsiyonel
+    String? deviceId,
   }) async {
-    final res = await http.post(
-      _u('/birthchart/start'),
-      headers: ApiBase.headers(deviceId: deviceId),
-      body: jsonEncode({
-        "name": name,
-        "birth_date": birthDate,
-        "birth_time": (birthTime == null || birthTime.trim().isEmpty) ? null : birthTime.trim(),
-        "birth_city": birthCity,
-        "birth_country": birthCountry,
-        "topic": topic,
-        "question": (question == null || question.trim().isEmpty) ? null : question.trim(),
-      }),
-    );
+    final res = await http
+        .post(
+          _u('/birthchart/start'),
+          headers: ApiBase.headers(deviceId: deviceId),
+          body: jsonEncode({
+            "name": name,
+            "birth_date": birthDate,
+            "birth_time": (birthTime == null || birthTime.trim().isEmpty) ? null : birthTime.trim(),
+            "birth_city": birthCity,
+            "birth_country": birthCountry,
+            "topic": topic,
+            "question": (question == null || question.trim().isEmpty) ? null : question.trim(),
+          }),
+        )
+        .timeout(_defaultTimeout);
 
     if (res.statusCode != 200) {
       throw Exception("birthchart/start failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}");
@@ -49,25 +54,23 @@ class BirthChartApi {
     return BirthChartReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
-  /// ✅ LEGACY (mock) için kalsın.
-  /// Real ödeme: /payments/verify server-side unlock yapıyor, burada çağırma.
   static Future<BirthChartReading> markPaid({
     required String readingId,
     String? paymentRef,
-    String? deviceId, // ✅ opsiyonel
+    String? deviceId,
   }) async {
     final ref = (paymentRef ?? '').trim();
-
-    // Coffee/Hand/Numerology ile aynı kural
     if (ref.isNotEmpty && !ref.startsWith("TEST-")) {
       throw Exception("markPaid legacy only. Real payments use /payments/verify.");
     }
 
-    final res = await http.post(
-      _u('/birthchart/$readingId/mark-paid'),
-      headers: ApiBase.headers(deviceId: deviceId),
-      body: jsonEncode({"payment_ref": paymentRef}),
-    );
+    final res = await http
+        .post(
+          _u('/birthchart/$readingId/mark-paid'),
+          headers: ApiBase.headers(deviceId: deviceId),
+          body: jsonEncode({"payment_ref": paymentRef}),
+        )
+        .timeout(_defaultTimeout);
 
     if (res.statusCode != 200) {
       throw Exception("birthchart/mark-paid failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}");
@@ -77,12 +80,14 @@ class BirthChartApi {
 
   static Future<BirthChartReading> generate({
     required String readingId,
-    String? deviceId, // ✅ opsiyonel
+    String? deviceId,
   }) async {
-    final res = await http.post(
-      _u('/birthchart/$readingId/generate'),
-      headers: ApiBase.headers(deviceId: deviceId),
-    );
+    final res = await http
+        .post(
+          _u('/birthchart/$readingId/generate'),
+          headers: ApiBase.headers(deviceId: deviceId),
+        )
+        .timeout(_generateTimeout);
 
     if (res.statusCode != 200) {
       throw Exception("birthchart/generate failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}");
@@ -94,10 +99,12 @@ class BirthChartApi {
     required String readingId,
     String? deviceId,
   }) async {
-    final res = await http.get(
-      _u('/birthchart/$readingId'),
-      headers: ApiBase.headers(deviceId: deviceId),
-    );
+    final res = await http
+        .get(
+          _u('/birthchart/$readingId'),
+          headers: ApiBase.headers(deviceId: deviceId),
+        )
+        .timeout(_defaultTimeout);
 
     if (res.statusCode != 200) {
       throw Exception("birthchart/detail failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}");

@@ -1,14 +1,14 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import '../../services/payment_api.dart';
-import '../../services/purchase_api.dart';
-import '../../services/hand_api.dart';
 import '../../services/device_id_service.dart';
+import '../../services/hand_api.dart';
+import '../../services/iap_service.dart';
+import '../../services/product_catalog.dart';
+
 import '../../widgets/glass_card.dart';
 import '../../widgets/gradient_button.dart';
 import '../../widgets/mystic_scaffold.dart';
-import 'hand_result_screen.dart';
 
 class HandPaymentScreen extends StatefulWidget {
   final String readingId;
@@ -21,94 +21,34 @@ class HandPaymentScreen extends StatefulWidget {
 class _HandPaymentScreenState extends State<HandPaymentScreen> {
   bool _loading = false;
 
-  static const String _handSku = "fall_hand_39";
-  static const double _handPrice = 39.0;
+  // ✅ Debug modda da store akışını test etmek istersen true
+  static const bool debugUseStoreIap = false;
 
-  Future<void> _goResult(String readingId) async {
-    if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => HandResultScreen(readingId: readingId)),
-    );
-  }
-
-  Future<void> _payLegacyMock() async {
-    final res = await PaymentApi.startPayment(
-      readingId: widget.readingId,
-      product: "hand",
-    );
-
-    if (!res.ok) {
-      throw Exception('Ödeme başarısız: ${res.provider}');
-    }
-
-    await HandApi.markPaid(
-      readingId: widget.readingId,
-      paymentRef: res.paymentId,
-    );
-
-    final reading = await HandApi.generate(readingId: widget.readingId);
-    await _goResult(reading.id);
-  }
-
-  Future<void> _payStoreFlow() async {
-    final deviceId = await DeviceIdService.getOrCreate();
-
-    final intent = await PurchaseApi.createIntent(
-      deviceId: deviceId,
-      readingId: widget.readingId,
-      sku: _handSku,
-    );
-
-    final bool useMockPurchase = !kReleaseMode;
-    final String platform = defaultTargetPlatform == TargetPlatform.iOS ? "app_store" : "google_play";
-
-    final String transactionId =
-        useMockPurchase ? "TXN-DEV-${DateTime.now().millisecondsSinceEpoch}" : "TXN-REAL";
-
-    String? purchaseToken;
-    String? receiptData;
-
-    if (useMockPurchase) {
-      if (platform == "google_play") {
-        purchaseToken = "DEV_TOKEN_123456";
-      } else {
-        receiptData = "DEV_RECEIPT_DATA_ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-      }
-    } else {
-      throw Exception("Store satın alma entegrasyonu (IAP) henüz bağlanmadı. Debug modda test edebilirsin.");
-    }
-
-    final verify = await PurchaseApi.verify(
-      deviceId: deviceId,
-      paymentId: intent.paymentId,
-      sku: _handSku,
-      platform: platform,
-      transactionId: transactionId,
-      purchaseToken: purchaseToken,
-      receiptData: receiptData,
-    );
-
-    if (!verify.verified) {
-      throw Exception("Ödeme doğrulanamadı: ${verify.status}");
-    }
-
-    final reading = await HandApi.generate(readingId: widget.readingId, deviceId: deviceId);
-    await _goResult(reading.id);
-  }
-
-  Future<void> _payAndGenerate() async {
+  Future<void> _pay() async {
     setState(() => _loading = true);
     try {
-      const bool debugTestStoreFlow = false;
+      final deviceId = await DeviceIdService.getOrCreate();
 
-      if (!kReleaseMode && debugTestStoreFlow) {
-        await _payStoreFlow();
-      } else {
-        await _payLegacyMock();
+      final shouldUseIap = kReleaseMode || debugUseStoreIap;
+      if (shouldUseIap) {
+        final verify = await IapService.instance.buyAndVerify(
+          readingId: widget.readingId,
+          sku: ProductCatalog.hand39,
+        );
+        if (!verify.verified) {
+          throw Exception("Ödeme doğrulanamadı: ${verify.status}");
+        }
       }
+
+      await HandApi.generate(readingId: widget.readingId, deviceId: deviceId);
+
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Ödeme/Yorum hatası: $e')),
+      );
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -117,8 +57,6 @@ class _HandPaymentScreenState extends State<HandPaymentScreen> {
   @override
   Widget build(BuildContext context) {
     return MysticScaffold(
-      scrimOpacity: 0.82,
-      patternOpacity: 0.18,
       appBar: AppBar(title: const Text('Ödeme')),
       body: Padding(
         padding: const EdgeInsets.all(16),
@@ -127,19 +65,30 @@ class _HandPaymentScreenState extends State<HandPaymentScreen> {
             GlassCard(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
-                  Text('El Falı', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-                  SizedBox(height: 10),
-                  Text('Avucundaki çizgiler, karakterin ve yolun hakkında küçük ipuçları taşır.\nŞimdi yorumlayalım.'),
-                  SizedBox(height: 12),
-                  Text('Tutar: 39₺', style: TextStyle(fontWeight: FontWeight.w800)),
+                children: [
+                  const Text('El Falı', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 10),
+                  const Text('Avucundaki çizgiler, karakterin ve yolun hakkında küçük ipuçları taşır.\nŞimdi yorumlayalım.'),
+                  const SizedBox(height: 12),
+
+                  const Text('Tutar: 39 ₺', style: TextStyle(fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 4),
+                  Text(
+                    '+ vergiler',
+                    style: TextStyle(color: Colors.white.withOpacity(0.78), fontSize: 12, fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Vergiler Google Play tarafından ödeme sırasında eklenir.',
+                    style: TextStyle(color: Colors.white.withOpacity(0.70), fontSize: 11, height: 1.2),
+                  ),
                 ],
               ),
             ),
             const SizedBox(height: 18),
             GradientButton(
-              text: _loading ? 'İşleniyor...' : 'Falımı Başlat ✨',
-              onPressed: _loading ? null : _payAndGenerate,
+              text: _loading ? 'İşleniyor...' : 'Ödemeyi Tamamla ✨',
+              onPressed: _loading ? null : _pay,
             ),
           ],
         ),

@@ -36,10 +36,11 @@ class _TarotProcessingScreenState extends State<TarotProcessingScreen> {
   int _elapsed = 0;
   static const int _pollSec = 2;
 
-  // ✅ generate'i spamlememek için
   bool _generateTriggered = false;
 
-  // UX: bekleme çok uzarsa kullanıcıya aksiyon sun
+  // ✅ processing -> paid/selected geri düşerse (OpenAI hata/timeout) tekrar generate tetikle
+  String _lastStatus = '';
+
   static const int _warnSec = 18;
   static const int _hardWarnSec = 40;
 
@@ -62,6 +63,13 @@ class _TarotProcessingScreenState extends State<TarotProcessingScreen> {
     await _pollOnce();
   }
 
+  bool _asBool(dynamic v) {
+    if (v is bool) return v;
+    if (v is num) return v != 0;
+    final s = (v ?? '').toString().toLowerCase().trim();
+    return s == 'true' || s == '1' || s == 'yes';
+  }
+
   Future<void> _pollOnce() async {
     if (_done) return;
 
@@ -69,13 +77,12 @@ class _TarotProcessingScreenState extends State<TarotProcessingScreen> {
 
     try {
       final deviceId = await DeviceIdService.getOrCreate();
-
       final d = await TarotApi.detail(readingId: widget.readingId, deviceId: deviceId);
 
       final status = (d['status'] ?? '').toString().trim();
       final text = (d['result_text'] ?? '').toString().trim();
+      final isPaid = _asBool(d['is_paid']);
 
-      // ✅ completed + text => result
       if (status == 'completed' && text.isNotEmpty) {
         _done = true;
         if (!mounted) return;
@@ -93,16 +100,19 @@ class _TarotProcessingScreenState extends State<TarotProcessingScreen> {
         return;
       }
 
-      // ✅ paid => generate'i sadece 1 kere tetikle
-      // (backend idempotent olsa bile biz client tarafında spamlemiyoruz)
-      if (status == 'paid' && !_generateTriggered) {
-        _generateTriggered = true;
-        await TarotApi.generate(readingId: widget.readingId, deviceId: deviceId);
+      // ✅ status'a takılma:
+      // is_paid == true ise generate tetiklenebilir (selected/paid fark etmez)
+      final cameBackFromProcessing = (_lastStatus == 'processing' && (status == 'paid' || status == 'selected'));
+
+      if (isPaid && (!_generateTriggered || cameBackFromProcessing)) {
+        // processing'te değilse tetiklemeyi dene
+        if (status != 'processing') {
+          _generateTriggered = true;
+          await TarotApi.generate(readingId: widget.readingId, deviceId: deviceId);
+        }
       }
 
-      // ✅ processing ise sadece bekle
-      // ✅ pending_payment ise generate çağırma (ödeme henüz tamam değil)
-      // status başka bir şey ise de bekle (örn: pending_payment)
+      _lastStatus = status;
 
       if (mounted) {
         setState(() {
@@ -123,7 +133,6 @@ class _TarotProcessingScreenState extends State<TarotProcessingScreen> {
   Future<void> _forceRetryGenerate() async {
     try {
       final deviceId = await DeviceIdService.getOrCreate();
-      // kullanıcı manuel basınca yeniden generate basabilir ama kontrollü:
       _generateTriggered = true;
       await TarotApi.generate(readingId: widget.readingId, deviceId: deviceId);
       if (mounted) {
@@ -158,14 +167,12 @@ class _TarotProcessingScreenState extends State<TarotProcessingScreen> {
           children: [
             const SizedBox(width: 56, height: 56, child: CircularProgressIndicator()),
             const SizedBox(height: 16),
-
             Text(
               _error ? 'Bağlantı sorunu oluştu' : 'Tarot yorumun hazırlanıyor…',
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
-
             Text(
               _error
                   ? (_errorMsg ?? 'Bilinmeyen hata')
@@ -177,9 +184,7 @@ class _TarotProcessingScreenState extends State<TarotProcessingScreen> {
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white.withOpacity(0.75), height: 1.25),
             ),
-
             const SizedBox(height: 16),
-
             if (_error)
               SizedBox(
                 width: double.infinity,
@@ -194,7 +199,6 @@ class _TarotProcessingScreenState extends State<TarotProcessingScreen> {
                   child: const Text('Tekrar Dene'),
                 ),
               ),
-
             if (!_error && hardWarn)
               SizedBox(
                 width: double.infinity,

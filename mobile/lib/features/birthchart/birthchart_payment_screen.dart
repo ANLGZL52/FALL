@@ -6,6 +6,7 @@ import '../../services/device_id_service.dart';
 import '../../services/iap_service.dart';
 import '../../services/payment_api.dart';
 import '../../services/birthchart_api.dart';
+import '../../services/product_catalog.dart';
 import '../../widgets/mystic_scaffold.dart';
 
 import 'birthchart_loading_screen.dart';
@@ -23,7 +24,11 @@ class _BirthChartPaymentScreenState extends State<BirthChartPaymentScreen> {
   String? _lastPaymentId;
 
   static const double _amount = 299.0;
-  static const String _sku = "fall_birthchart_299";
+
+  // ✅ Play Console ile birebir
+  static const bool debugUseStoreIap = false;
+
+  String get _sku => ProductCatalog.birthchart299;
 
   Future<void> _goLoading() async {
     if (!mounted) return;
@@ -37,9 +42,7 @@ class _BirthChartPaymentScreenState extends State<BirthChartPaymentScreen> {
     );
   }
 
-  /// ✅ Debug/Local: Numerology standardı
-  /// payments/start -> TEST-...
-  /// birthchart/mark-paid -> unlock
+  /// ✅ Debug/Local: legacy mock
   Future<void> _payLegacyMock(String deviceId) async {
     final res = await PaymentApi.startPayment(
       readingId: widget.reading.id,
@@ -49,12 +52,17 @@ class _BirthChartPaymentScreenState extends State<BirthChartPaymentScreen> {
     );
 
     if (!res.ok) throw Exception("Ödeme başarısız: ${res.provider}");
-    _lastPaymentId = res.paymentId;
+
+    if (mounted) {
+      setState(() => _lastPaymentId = res.paymentId);
+    } else {
+      _lastPaymentId = res.paymentId;
+    }
 
     await BirthChartApi.markPaid(
       readingId: widget.reading.id,
-      paymentRef: res.paymentId, // TEST-...
-      // Not: BirthChartApi'nde device header yoksa sorun değil; ama varsa ekleyebilirsin
+      paymentRef: res.paymentId,
+      deviceId: deviceId,
     );
 
     await _goLoading();
@@ -71,9 +79,13 @@ class _BirthChartPaymentScreenState extends State<BirthChartPaymentScreen> {
       throw Exception("Ödeme doğrulanamadı: ${verify.status}");
     }
 
-    _lastPaymentId = verify.paymentId;
+    if (mounted) {
+      setState(() => _lastPaymentId = verify.paymentId);
+    } else {
+      _lastPaymentId = verify.paymentId;
+    }
 
-    // verify sonrası backend reading'i paid yaptı -> generate serbest
+    // verify sonrası backend paid yaptı -> loading ekranı generate/poll yapmalı
     await _goLoading();
   }
 
@@ -84,26 +96,16 @@ class _BirthChartPaymentScreenState extends State<BirthChartPaymentScreen> {
     try {
       final deviceId = await DeviceIdService.getOrCreate();
 
-      // ✅ KURAL:
-      // - Release: Store/IAP
-      // - Debug: Legacy mock
-      const bool debugUseStoreIap = false;
+      final shouldUseIap = kReleaseMode || debugUseStoreIap;
 
-      if (kReleaseMode) {
+      if (shouldUseIap) {
         await _payStoreIap();
       } else {
-        if (debugUseStoreIap) {
-          await _payStoreIap();
-        } else {
-          await _payLegacyMock(deviceId);
-        }
+        await _payLegacyMock(deviceId);
       }
     } catch (e) {
       if (!mounted) return;
-
-      // stack toparla (loading vs ekranda kaldıysa)
       Navigator.of(context).popUntil((r) => r.isFirst);
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Ödeme hatası: $e")),
       );
@@ -171,11 +173,31 @@ class _BirthChartPaymentScreenState extends State<BirthChartPaymentScreen> {
                     Text("Konu: ${r.topic}", style: const TextStyle(color: Colors.white)),
                     Text("Soru: ${r.question ?? "—"}", style: const TextStyle(color: Colors.white)),
                     const SizedBox(height: 10),
+
                     const Text(
                       "Tutar: 299 ₺",
                       style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900),
                     ),
+                    const SizedBox(height: 4),
+                    Text(
+                      "+ vergiler",
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.78),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
                     const SizedBox(height: 6),
+                    Text(
+                      "Vergiler Google Play tarafından ödeme sırasında eklenir.",
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.70),
+                        fontSize: 12,
+                        height: 1.2,
+                      ),
+                    ),
+
+                    const SizedBox(height: 8),
                     Text("SKU: $_sku", style: const TextStyle(color: Colors.white70, fontSize: 12)),
                     if (_lastPaymentId != null) ...[
                       const SizedBox(height: 6),

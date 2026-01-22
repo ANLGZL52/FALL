@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import uuid4
 import threading
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
@@ -20,12 +21,12 @@ from app.schemas.tarot import (
 from app.services.openai_service import generate_tarot_reading
 
 router = APIRouter(prefix="/tarot", tags=["tarot"])
+log = logging.getLogger("lunaura.tarot")
 
 
 def _run_generation_in_background(reading_id: str) -> None:
     """
-    Long-running OpenAI call must NOT block the main worker thread.
-    We run it in a daemon thread to avoid Gunicorn worker timeout.
+    OpenAI uzun sürebilir, request'i bloklamasın diye thread'de çalışır.
     """
     from sqlmodel import Session as _Session
 
@@ -34,17 +35,13 @@ def _run_generation_in_background(reading_id: str) -> None:
         if not r:
             return
 
-        # zaten completed ise üretme
         if r.status == "completed" and (r.result_text or "").strip():
             return
 
-        # ödeme yoksa üretme
         if not r.is_paid:
-            # Güvenlik: paid değilse processing'te kalmasın
             tarot_repo.set_status(session, reading_id, "paid" if r.payment_ref else "pending_payment")
             return
 
-        # kart yoksa üretme
         if not r.get_cards():
             tarot_repo.set_status(session, reading_id, "paid")
             return
@@ -61,17 +58,14 @@ def _run_generation_in_background(reading_id: str) -> None:
             )
             tarot_repo.set_status(session, reading_id, "completed", result_text=text)
         except Exception:
-            # hata olursa paid'e geri al (retry mümkün)
+            # Retry mümkün olsun: paid'e geri alıyoruz
+            log.exception("Tarot generation failed for reading_id=%s", reading_id)
             tarot_repo.set_status(session, reading_id, "paid")
             return
 
 
 def _spawn_thread(reading_id: str) -> None:
-    t = threading.Thread(
-        target=_run_generation_in_background,
-        args=(reading_id,),
-        daemon=True,
-    )
+    t = threading.Thread(target=_run_generation_in_background, args=(reading_id,), daemon=True)
     t.start()
 
 
@@ -101,10 +95,6 @@ def _get_or_404(session: Session, reading_id: str) -> TarotReadingDB:
 
 
 def _wanted_count(spread_type: str) -> int:
-    """
-    Flutter enum: TarotSpreadType { three, six, twelve }
-    Backend spread_type: "three" | "six" | "twelve"
-    """
     st = (spread_type or "").strip().lower()
     if st == "three":
         return 3
@@ -175,18 +165,14 @@ async def generate(reading_id: str, session: Session = Depends(get_session)):
 
     if not r.get_cards():
         raise HTTPException(status_code=400, detail="Önce kart seçmelisin.")
-
     if not r.is_paid:
         raise HTTPException(status_code=402, detail="Payment Required")
 
-    # zaten completed ise dön
     if r.status == "completed" and (r.result_text or "").strip():
         return _to_schema(r)
 
-    # ✅ Atomic lock: sadece 1 worker processing'e alabilsin
-    claimed = tarot_repo.claim_processing(session, reading_id)
-
-    # claim edemediysek: ya zaten processing/completed, thread spawnlama
+    # ✅ stale processing kurtarma + atomic lock
+    claimed = tarot_repo.claim_processing(session, reading_id, stale_seconds=120)
     if claimed:
         _spawn_thread(reading_id)
 

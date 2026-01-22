@@ -1,8 +1,19 @@
+# app/schemas/payments.py
+from __future__ import annotations
+
 from typing import Optional, Literal
 from pydantic import BaseModel
 
-# ✅ tarot eklendi
-ProductType = Literal["coffee", "hand", "tarot"]
+# ✅ tüm ürünleri destekle
+ProductType = Literal[
+    "coffee",
+    "hand",
+    "tarot",
+    "numerology",
+    "birthchart",
+    "personality",
+    "synastry",
+]
 
 
 class StartPaymentRequest(BaseModel):

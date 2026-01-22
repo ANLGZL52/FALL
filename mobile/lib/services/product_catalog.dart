@@ -1,14 +1,13 @@
 class ProductCatalog {
-  // ✅ Play Console Product ID = SKU
-  static const String coffee49 = "fall_coffee_49";
-  static const String hand39 = "fall_hand_39";
+  // ✅ Play Console Product ID = SKU (console’daki ile birebir)
+  static const String coffee49 = "coffee_49";
+  static const String hand39 = "hand_39";
 
-  static const String numerology299 = "fall_numerology_299";
-  static const String birthchart299 = "fall_birthchart_299";
-  static const String personality399 = "fall_personality_399";
-  static const String synastry149 = "fall_synastry_149";
+  static const String numerology299 = "numerology_299";
+  static const String birthchart299 = "birthchart_299";
+  static const String personality399 = "personality_399";
+  static const String synastry149 = "synastry_149";
 
-  // ✅ Tarot: Play Console’da hedeflediğin yeni ID’ler
   static const String tarot3_149 = "tarot_3_card_149";
   static const String tarot6_199 = "tarot_6_card_199";
   static const String tarot12_250 = "tarot_12_card_250";
@@ -25,6 +24,5 @@ class ProductCatalog {
     tarot12_250,
   };
 
-  // ✅ Eski kodlarda ProductCatalog.all kullanıldığı için uyumluluk:
   static List<String> get all => allSkus.toList();
 }

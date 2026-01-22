@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List
 
 from sqlmodel import Session, select
-from sqlalchemy import update
+from sqlalchemy import update, and_, or_
 
 from app.models.tarot_db import TarotReadingDB
 
@@ -66,32 +66,49 @@ def set_status(
     return r
 
 
-def claim_processing(session: Session, reading_id: str) -> bool:
+def claim_processing(session: Session, reading_id: str, *, stale_seconds: int = 120) -> bool:
     """
     ✅ Atomic "processing lock"
-    Aynı reading için birden fazla worker/thread generate başlatmasın.
 
-    - Zaten completed ise dokunmaz.
-    - Zaten processing ise dokunmaz.
+    - completed ise dokunmaz.
+    - processing ise dokunmaz (ama stale ise reclaim eder).
     - Paid/Selected gibi durumlarda processing'e geçirir.
+
+    Neden gerekli?
+    - Worker restart / thread ölümü gibi durumlarda kayıt processing'te takılı kalabiliyor.
+      Bu durumda stale_seconds sonrası tekrar claim edip generate'i yeniden başlatıyoruz.
     """
     now = datetime.utcnow()
+    stale_cutoff = now - timedelta(seconds=int(stale_seconds or 120))
+
+    can_claim = or_(
+        TarotReadingDB.status != "processing",
+        and_(TarotReadingDB.status == "processing", TarotReadingDB.updated_at < stale_cutoff),
+    )
 
     stmt = (
         update(TarotReadingDB)
         .where(TarotReadingDB.id == reading_id)
-        .where(TarotReadingDB.status != "processing")
         .where(TarotReadingDB.status != "completed")
+        .where(can_claim)
         .values(status="processing", updated_at=now)
     )
 
     res = session.exec(stmt)
     session.commit()
 
-    # SQLAlchemy rowcount bazı driverlarda None dönebilir; gene de best-effort
+    # rowcount bazı ortamlarda None dönebiliyor → fallback
     try:
-        return bool(res.rowcount and res.rowcount > 0)
+        if res.rowcount is None:
+            raise RuntimeError("rowcount_none")
+        return bool(res.rowcount > 0)
     except Exception:
-        # Fallback: tekrar okuyup kontrol et
         r = get_reading(session, reading_id)
-        return bool(r and r.status == "processing")
+        if not r:
+            return False
+
+        # updated_at şimdiye çok yakınsa muhtemelen claim ettik
+        if r.status == "processing" and r.updated_at and (now - r.updated_at).total_seconds() < 5:
+            return True
+
+        return False

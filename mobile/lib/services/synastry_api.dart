@@ -18,20 +18,27 @@ String _extractErrorMessage(String body) {
 }
 
 class SynastryApi {
+  static const Duration _defaultTimeout = Duration(seconds: 30);
+  static const Duration _generateTimeout = Duration(seconds: 150);
+
   Future<SynastryStartResponse> start(
     SynastryStartRequest req, {
     String? deviceId,
   }) async {
     final uri = Uri.parse('${ApiBase.baseUrl}/synastry/start');
 
-    final res = await http.post(
-      uri,
-      headers: ApiBase.headers(deviceId: deviceId),
-      body: jsonEncode(req.toJson()),
-    );
+    final res = await http
+        .post(
+          uri,
+          headers: ApiBase.headers(deviceId: deviceId),
+          body: jsonEncode(req.toJson()),
+        )
+        .timeout(_defaultTimeout);
 
     if (res.statusCode >= 400) {
-      throw Exception('Synastry start failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
+      throw Exception(
+        'Synastry start failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}',
+      );
     }
 
     final data = jsonDecode(res.body) as Map<String, dynamic>;
@@ -50,17 +57,20 @@ class SynastryApi {
     }
 
     final uri = Uri.parse('${ApiBase.baseUrl}/synastry/$id/mark-paid');
-
     final body = SynastryMarkPaidRequest(paymentRef: paymentRef).toJson();
 
-    final res = await http.post(
-      uri,
-      headers: ApiBase.headers(deviceId: deviceId),
-      body: jsonEncode(body),
-    );
+    final res = await http
+        .post(
+          uri,
+          headers: ApiBase.headers(deviceId: deviceId),
+          body: jsonEncode(body),
+        )
+        .timeout(_defaultTimeout);
 
     if (res.statusCode >= 400) {
-      throw Exception('Synastry mark-paid failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
+      throw Exception(
+        'Synastry mark-paid failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}',
+      );
     }
   }
 
@@ -70,13 +80,17 @@ class SynastryApi {
   }) async {
     final uri = Uri.parse('${ApiBase.baseUrl}/synastry/$id/generate');
 
-    final res = await http.post(
-      uri,
-      headers: ApiBase.headers(deviceId: deviceId),
-    );
+    final res = await http
+        .post(
+          uri,
+          headers: ApiBase.headers(deviceId: deviceId),
+        )
+        .timeout(_generateTimeout);
 
     if (res.statusCode >= 400) {
-      throw Exception('Synastry generate failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
+      throw Exception(
+        'Synastry generate failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}',
+      );
     }
   }
 
@@ -86,13 +100,17 @@ class SynastryApi {
   }) async {
     final uri = Uri.parse('${ApiBase.baseUrl}/synastry/$id');
 
-    final res = await http.get(
-      uri,
-      headers: ApiBase.headers(deviceId: deviceId),
-    );
+    final res = await http
+        .get(
+          uri,
+          headers: ApiBase.headers(deviceId: deviceId),
+        )
+        .timeout(_defaultTimeout);
 
     if (res.statusCode >= 400) {
-      throw Exception('Synastry status failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
+      throw Exception(
+        'Synastry status failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}',
+      );
     }
 
     final data = jsonDecode(res.body) as Map<String, dynamic>;
@@ -105,9 +123,14 @@ class SynastryApi {
   }) async {
     final uri = Uri.parse('${ApiBase.baseUrl}/synastry/$id/pdf');
 
-    final res = await http.get(uri, headers: ApiBase.headers(deviceId: deviceId));
+    final res = await http
+        .get(uri, headers: ApiBase.headers(deviceId: deviceId))
+        .timeout(_defaultTimeout);
+
     if (res.statusCode >= 400) {
-      throw Exception('PDF download failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
+      throw Exception(
+        'PDF download failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}',
+      );
     }
     return res.bodyBytes;
   }

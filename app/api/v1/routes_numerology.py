@@ -103,7 +103,7 @@ def generate(reading_id: str, db: Session = Depends(get_db)):
 
     # ✅ Ödeme zorunlu (artık store akışına bağlandı)
     if not bool(obj.get("is_paid", False)):
-        raise HTTPException(status_code=400, detail="Payment required before reading")
+        raise HTTPException(status_code=402, detail="Payment Required")
 
     if (obj.get("result_text") or "").strip():
         return obj

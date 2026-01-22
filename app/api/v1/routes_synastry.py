@@ -9,8 +9,12 @@ from sqlmodel import Session
 from app.db import get_session
 from app.schemas.synastry import SynastryStartRequest, SynastryMarkPaidRequest, SynastryRatingRequest
 from app.repositories.synastry_repo import synastry_repo
+
+# Not: sende generate_synastry_reading hangi modüldeyse orası kalsın.
+# Ben burada senin kullandığın importu bozmuyorum:
 from app.services.synastry_service import generate_synastry_reading
 from app.services.pdf_service import build_synastry_pdf_bytes
+
 
 router = APIRouter(prefix="/synastry", tags=["synastry"])
 
@@ -75,33 +79,50 @@ def mark_paid(
 
 @router.post("/{reading_id}/generate")
 def generate(reading_id: str, session: Session = Depends(get_session)):
-    reading = synastry_repo.get(session=session, reading_id=reading_id)
+    """
+    ✅ İdempotent + race-safe generate:
+    - done ise: mevcut sonucu döndür (tekrar OpenAI yok)
+    - processing ise: mevcut state'i döndür (tekrar OpenAI yok)
+    - paid ise: processing'e claim et ve 1 kez üret
+    """
+    # 1) claim
+    reading, claimed = synastry_repo.claim_processing(session=session, reading_id=reading_id)
     if not reading:
         raise HTTPException(status_code=404, detail="Reading not found")
 
+    # 2) ödeme kontrolü
     if not reading.get("is_paid"):
         raise HTTPException(status_code=402, detail="Payment Required")
 
-    synastry_repo.set_status(session=session, reading_id=reading_id, status="processing")
+    # 3) zaten done ise hemen dön
+    if (reading.get("result_text") or "").strip():
+        return reading
 
+    # 4) processing ama bu request claim etmediyse tekrar üretme
+    if (reading.get("status") or "").lower().strip() == "processing" and not claimed:
+        # burada 200 dönüyoruz; Flutter zaten poll ediyor.
+        return reading
+
+    # 5) Bu request processing'i claim ettiyse üret
     try:
         result_text = generate_synastry_reading(
             name_a=reading.get("name_a") or "",
             birth_date_a=reading.get("birth_date_a") or "",
             birth_time_a=reading.get("birth_time_a"),
             birth_city_a=reading.get("birth_city_a") or "",
-            birth_country_a=reading.get("birth_country_a") or "Türkiye",
+            birth_country_a=reading.get("birth_country_a") or "TR",
             name_b=reading.get("name_b") or "",
             birth_date_b=reading.get("birth_date_b") or "",
             birth_time_b=reading.get("birth_time_b"),
             birth_city_b=reading.get("birth_city_b") or "",
-            birth_country_b=reading.get("birth_country_b") or "Türkiye",
+            birth_country_b=reading.get("birth_country_b") or "TR",
             topic=reading.get("topic") or "Genel",
             question=reading.get("question"),
         )
         updated = synastry_repo.set_result(session=session, reading_id=reading_id, result_text=result_text)
         return updated
     except Exception as e:
+        # hata olursa paid'e geri al (yeniden generate denenebilsin)
         synastry_repo.set_status(session=session, reading_id=reading_id, status="paid")
         raise HTTPException(status_code=500, detail=f"Synastry üretilemedi: {e}")
 
@@ -120,7 +141,7 @@ def download_pdf(reading_id: str, session: Session = Depends(get_session)):
     if not reading:
         raise HTTPException(status_code=404, detail="Reading not found")
 
-    if not reading.get("result_text"):
+    if not (reading.get("result_text") or "").strip():
         raise HTTPException(status_code=409, detail="Result not generated yet")
 
     pdf_bytes = build_synastry_pdf_bytes(

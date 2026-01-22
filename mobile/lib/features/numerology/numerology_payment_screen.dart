@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 
 import '../../services/device_id_service.dart';
 import '../../services/iap_service.dart';
-import '../../services/payment_api.dart';
-import '../../services/numerology_api.dart';
+import '../../services/product_catalog.dart';
+
 import '../../widgets/glass_card.dart';
 import '../../widgets/gradient_button.dart';
 import '../../widgets/mystic_scaffold.dart';
@@ -33,8 +33,10 @@ class _NumerologyPaymentScreenState extends State<NumerologyPaymentScreen> {
   bool _loading = false;
   String? _lastPaymentId;
 
-  static const double _amount = 299.0;
-  static const String _sku = "fall_numerology_299";
+  final String _sku = ProductCatalog.numerology299;
+
+  // ✅ Debug modda da store IAP test etmek istersen true yap
+  static const bool debugUseStoreIap = false;
 
   Future<void> _goLoading() async {
     if (!mounted) return;
@@ -42,76 +44,40 @@ class _NumerologyPaymentScreenState extends State<NumerologyPaymentScreen> {
       MaterialPageRoute(
         builder: (_) => NumerologyLoadingScreen(
           readingId: widget.readingId,
-          title: "Numeroloji Analizi",
+          title: "Numeroloji analizin hazırlanıyor...",
         ),
       ),
     );
   }
 
-  /// ✅ Debug/Local: mevcut düzen bozulmasın diye legacy start + markPaid
-  Future<void> _payLegacyMock(String deviceId) async {
-    final res = await PaymentApi.startPayment(
-      readingId: widget.readingId,
-      amount: _amount,
-      product: "numerology",
-      deviceId: deviceId,
-    );
-
-    if (!res.ok) throw Exception("Ödeme başarısız: ${res.provider}");
-    _lastPaymentId = res.paymentId;
-
-    // Numerology endpoint (legacy unlock)
-    await NumerologyApi.markPaid(
-      readingId: widget.readingId,
-      paymentRef: res.paymentId, // TEST-...
-      deviceId: deviceId,
-    );
-
-    await _goLoading();
-  }
-
-  /// ✅ Release: Store satın alma + backend verify
-  Future<void> _payStoreIap(String deviceId) async {
-    final verify = await IapService.instance.buyAndVerify(
-      readingId: widget.readingId,
-      sku: _sku,
-    );
-
-    if (!verify.verified) {
-      throw Exception("Ödeme doğrulanamadı: ${verify.status}");
-    }
-
-    _lastPaymentId = verify.paymentId;
-
-    // verify sonrası backend server-side paid yaptı -> generate serbest
-    await _goLoading();
-  }
-
-  Future<void> _payAndStart() async {
+  Future<void> _payAndContinue() async {
     if (_loading) return;
     setState(() => _loading = true);
 
     try {
-      final deviceId = await DeviceIdService.getOrCreate();
+      // header için device id üret
+      await DeviceIdService.getOrCreate();
 
-      // ✅ KURAL:
-      // - Release: Store/IAP çalışsın
-      // - Debug: Legacy çalışsın (istersen store test edebilirsin)
-      const bool debugUseStoreIap = false;
+      final shouldUseIap = kReleaseMode || debugUseStoreIap;
+      if (shouldUseIap) {
+        final verify = await IapService.instance.buyAndVerify(
+          readingId: widget.readingId,
+          sku: _sku,
+        );
 
-      if (kReleaseMode) {
-        await _payStoreIap(deviceId);
-      } else {
-        if (debugUseStoreIap) {
-          await _payStoreIap(deviceId);
-        } else {
-          await _payLegacyMock(deviceId);
+        if (!verify.verified) {
+          throw Exception("Ödeme doğrulanamadı: ${verify.status}");
         }
+
+        if (mounted) setState(() => _lastPaymentId = verify.paymentId);
       }
+
+      // ✅ generate burada YOK. sadece loading’e geç.
+      await _goLoading();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Ödeme hatası: $e")),
+        SnackBar(content: Text('Ödeme hatası: $e')),
       );
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -121,12 +87,12 @@ class _NumerologyPaymentScreenState extends State<NumerologyPaymentScreen> {
   @override
   Widget build(BuildContext context) {
     return MysticScaffold(
-      scrimOpacity: 0.82,
-      patternOpacity: 0.18,
-      appBar: AppBar(title: const Text("Ödeme")),
+      scrimOpacity: 0.70,
+      patternOpacity: 0.22,
+      appBar: AppBar(title: const Text('Ödeme')),
       body: Padding(
         padding: const EdgeInsets.all(16),
-        child: ListView(
+        child: Column(
           children: [
             GlassCard(
               child: Column(
@@ -148,30 +114,35 @@ class _NumerologyPaymentScreenState extends State<NumerologyPaymentScreen> {
                     "Tutar: 299 ₺",
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 4),
+                  Text(
+                    "+ vergiler",
+                    style: TextStyle(color: Colors.white.withOpacity(0.78), fontSize: 12, fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    "Vergiler Google Play tarafından ödeme sırasında eklenir.",
+                    style: TextStyle(color: Colors.white.withOpacity(0.70), fontSize: 12, height: 1.2),
+                  ),
+                  const SizedBox(height: 10),
                   Text(
                     "SKU: $_sku",
                     style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 12),
                   ),
+                  if (_lastPaymentId != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      "Son işlem: $_lastPaymentId",
+                      style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 12),
+                    ),
+                  ],
                 ],
               ),
             ),
-            const SizedBox(height: 12),
-            if (_lastPaymentId != null)
-              Text(
-                "Son işlem: $_lastPaymentId",
-                style: TextStyle(color: Colors.white.withOpacity(0.75)),
-              ),
-            const SizedBox(height: 18),
+            const Spacer(),
             GradientButton(
-              text: _loading ? "İşleniyor..." : "Ödemeyi Başlat ve Analizi Gör ✨",
-              onPressed: _loading ? null : _payAndStart,
-            ),
-            const SizedBox(height: 10),
-            Text(
-              "Ödeme doğrulandıktan sonra analiz üretimine geçilir.",
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white.withOpacity(0.70), fontSize: 12),
+              text: _loading ? 'İşleniyor...' : 'Ödemeyi Başlat → Analizi Gör',
+              onPressed: _loading ? null : _payAndContinue,
             ),
           ],
         ),

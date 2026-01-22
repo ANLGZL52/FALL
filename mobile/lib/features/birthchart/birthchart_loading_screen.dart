@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../services/birthchart_api.dart';
@@ -20,31 +21,90 @@ class BirthChartLoadingScreen extends StatefulWidget {
 }
 
 class _BirthChartLoadingScreenState extends State<BirthChartLoadingScreen> {
+  bool _running = false;
+
   @override
   void initState() {
     super.initState();
     _run();
   }
 
+  bool _isHttp(Object e, int code) {
+    final s = e.toString();
+    return s.contains(' $code ') || s.contains('$code /') || s.contains(':$code');
+  }
+
+  String _prettyError(Object e) {
+    final s = e.toString();
+
+    if (_isHttp(e, 402)) {
+      return "Ödeme doğrulaması sisteme henüz yansımadı.\n"
+          "Birazdan otomatik tekrar deneyeceğim…";
+    }
+
+    if (_isHttp(e, 409)) {
+      return "İşlem çakıştı / sonuç hazır değil.\n"
+          "Tekrar deniyorum…";
+    }
+
+    if (s.toLowerCase().contains('timeout') || s.toLowerCase().contains('zaman')) {
+      return "İşlem zaman aşımına uğradı.\n"
+          "İnternetini kontrol edip tekrar dene.";
+    }
+
+    return "Bir hata oluştu:\n$s";
+  }
+
   Future<void> _run() async {
+    if (_running) return;
+    _running = true;
+
     try {
       final deviceId = await DeviceIdService.getOrCreate();
 
-      final reading = await BirthChartApi.generate(
-        readingId: widget.readingId,
-        deviceId: deviceId,
-      );
+      // ✅ 402/409 timing için kontrollü retry
+      const maxTry = 6;
+      const baseDelayMs = 900;
 
-      if (!mounted) return;
+      for (var i = 1; i <= maxTry; i++) {
+        try {
+          final reading = await BirthChartApi.generate(
+            readingId: widget.readingId,
+            deviceId: deviceId,
+          );
 
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => BirthChartResultScreen(reading: reading)),
-        (route) => false,
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Hata: $e")));
-      Navigator.of(context).pop();
+          if (!mounted) return;
+
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (_) => BirthChartResultScreen(reading: reading)),
+            (route) => false,
+          );
+          return;
+        } catch (e) {
+          if (!mounted) return;
+
+          final retryable = _isHttp(e, 402) || _isHttp(e, 409);
+
+          if (retryable && i < maxTry) {
+            // snack spam olmasın
+            if (i == 1 || i == 3) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(_prettyError(e)), behavior: SnackBarBehavior.floating),
+              );
+            }
+            await Future.delayed(Duration(milliseconds: baseDelayMs * i));
+            continue;
+          }
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(_prettyError(e)), behavior: SnackBarBehavior.floating),
+          );
+          Navigator.of(context).pop();
+          return;
+        }
+      }
+    } finally {
+      _running = false;
     }
   }
 
@@ -89,7 +149,7 @@ class _BirthChartLoadingScreenState extends State<BirthChartLoadingScreen> {
                     const SizedBox(height: 10),
                     Text(
                       "Semboller ve temalar birleştiriliyor…\n"
-                      "Kişilik çekirdeği, ilişki dili ve dönem enerjileri netleştiriliyor…\n"
+                      "Harita yerleşimleri yorumlanıyor…\n"
                       "Birazdan sana özel, uygulanabilir öneriler hazır.",
                       style: TextStyle(color: Colors.white.withOpacity(0.80), height: 1.35),
                     ),

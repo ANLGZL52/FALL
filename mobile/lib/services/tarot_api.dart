@@ -61,11 +61,18 @@ class TarotApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  /// ✅ LEGACY ONLY (mock)
+  /// Real ödeme: IapService -> /payments/verify
   static Future<Map<String, dynamic>> markPaid({
     required String readingId,
     required String paymentRef,
     String? deviceId,
   }) async {
+    final ref = paymentRef.trim();
+    if (ref.isNotEmpty && !ref.startsWith("TEST-")) {
+      throw Exception("markPaid legacy only. Real payments use /payments/verify.");
+    }
+
     final res = await http.post(
       _u('/tarot/$readingId/mark-paid'),
       headers: ApiBase.headers(deviceId: deviceId),

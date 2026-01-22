@@ -33,6 +33,8 @@ class PersonalityReading {
   final bool isPaid;
   final String? paymentRef;
 
+  final int? rating;
+
   PersonalityReading({
     required this.id,
     required this.name,
@@ -46,6 +48,7 @@ class PersonalityReading {
     required this.resultText,
     required this.isPaid,
     required this.paymentRef,
+    required this.rating,
   });
 
   factory PersonalityReading.fromJson(Map<String, dynamic> j) {
@@ -62,12 +65,17 @@ class PersonalityReading {
       resultText: j["result_text"]?.toString(),
       isPaid: (j["is_paid"] ?? false) == true,
       paymentRef: j["payment_ref"]?.toString(),
+      rating: (j["rating"] is num) ? (j["rating"] as num).toInt() : int.tryParse("${j["rating"]}"),
     );
   }
 }
 
 class PersonalityApi {
   static Uri _u(String path) => Uri.parse('${ApiBase.baseUrl}$path');
+
+  // OpenAI çağrısı içerdiği için daha uzun timeout iyi olur.
+  static const Duration _generateTimeout = Duration(seconds: 120);
+  static const Duration _defaultTimeout = Duration(seconds: 30);
 
   static Future<PersonalityReading> start({
     required String name,
@@ -79,19 +87,21 @@ class PersonalityApi {
     String? question,
     String? deviceId,
   }) async {
-    final res = await http.post(
-      _u('/personality/start'),
-      headers: ApiBase.headers(deviceId: deviceId),
-      body: jsonEncode({
-        "name": name,
-        "birth_date": birthDate,
-        "birth_time": (birthTime == null || birthTime.trim().isEmpty) ? null : birthTime.trim(),
-        "birth_city": birthCity,
-        "birth_country": birthCountry,
-        "topic": topic,
-        "question": (question == null || question.trim().isEmpty) ? null : question.trim(),
-      }),
-    );
+    final res = await http
+        .post(
+          _u('/personality/start'),
+          headers: ApiBase.headers(deviceId: deviceId),
+          body: jsonEncode({
+            "name": name,
+            "birth_date": birthDate,
+            "birth_time": (birthTime == null || birthTime.trim().isEmpty) ? null : birthTime.trim(),
+            "birth_city": birthCity,
+            "birth_country": birthCountry,
+            "topic": topic,
+            "question": (question == null || question.trim().isEmpty) ? null : question.trim(),
+          }),
+        )
+        .timeout(_defaultTimeout);
 
     if (res.statusCode >= 400) {
       throw Exception('personality start failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
@@ -111,11 +121,13 @@ class PersonalityApi {
       throw Exception("markPaid legacy only. Real payments use /payments/verify.");
     }
 
-    final res = await http.post(
-      _u('/personality/$readingId/mark-paid'),
-      headers: ApiBase.headers(deviceId: deviceId),
-      body: jsonEncode({"payment_ref": paymentRef}),
-    );
+    final res = await http
+        .post(
+          _u('/personality/$readingId/mark-paid'),
+          headers: ApiBase.headers(deviceId: deviceId),
+          body: jsonEncode({"payment_ref": paymentRef}),
+        )
+        .timeout(_defaultTimeout);
 
     if (res.statusCode >= 400) {
       throw Exception('personality mark-paid failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
@@ -128,10 +140,12 @@ class PersonalityApi {
     required String readingId,
     String? deviceId,
   }) async {
-    final res = await http.post(
-      _u('/personality/$readingId/generate'),
-      headers: ApiBase.headers(deviceId: deviceId),
-    );
+    final res = await http
+        .post(
+          _u('/personality/$readingId/generate'),
+          headers: ApiBase.headers(deviceId: deviceId),
+        )
+        .timeout(_generateTimeout);
 
     if (res.statusCode >= 400) {
       throw Exception('personality generate failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
@@ -140,14 +154,34 @@ class PersonalityApi {
     return PersonalityReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
+  static Future<void> rate({
+    required String readingId,
+    required int rating,
+    String? deviceId,
+  }) async {
+    final res = await http
+        .post(
+          _u('/personality/$readingId/rate'),
+          headers: ApiBase.headers(deviceId: deviceId),
+          body: jsonEncode({"rating": rating}),
+        )
+        .timeout(_defaultTimeout);
+
+    if (res.statusCode >= 400) {
+      throw Exception('personality rate failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
+    }
+  }
+
   static Future<Uint8List> downloadPdfBytes({
     required String readingId,
     String? deviceId,
   }) async {
-    final res = await http.get(
-      _u('/personality/$readingId/pdf'),
-      headers: ApiBase.headers(deviceId: deviceId),
-    );
+    final res = await http
+        .get(
+          _u('/personality/$readingId/pdf'),
+          headers: ApiBase.headers(deviceId: deviceId),
+        )
+        .timeout(_defaultTimeout);
 
     if (res.statusCode >= 400) {
       throw Exception('personality pdf failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');

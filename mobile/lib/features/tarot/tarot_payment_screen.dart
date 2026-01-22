@@ -83,6 +83,14 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
     }
   }
 
+  // ✅ Backend formatı: ["major_18_moon|R", "major_00_fool|U", ...]
+  List<String> _cardsForApi() {
+    return widget.selectedCards.map((c) {
+      final suffix = c.isReversed ? 'R' : 'U';
+      return '${c.id}|$suffix';
+    }).toList();
+  }
+
   Future<void> _goProcessing() async {
     if (!mounted) return;
 
@@ -101,6 +109,15 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
   Future<void> _payStoreIap() async {
     final deviceId = await DeviceIdService.getOrCreate();
 
+    // ✅ 0) KRİTİK GARANTİ:
+    // ÖDEME BAŞLAMADAN ÖNCE seçilen kartlar DB’ye yazılsın.
+    // /payments/verify tarot’ta “cards boş” edge-case’ini sıfırlar.
+    await TarotApi.selectCards(
+      readingId: widget.readingId,
+      cards: _cardsForApi(),
+      deviceId: deviceId,
+    );
+
     // 1) Store purchase + backend verify (IapService içinde)
     final verify = await IapService.instance.buyAndVerify(
       readingId: widget.readingId,
@@ -112,11 +129,6 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
     }
 
     _lastPaymentId = verify.paymentId;
-
-    // ✅ ÖNEMLİ:
-    // Burada generate çağırmıyoruz.
-    // Processing ekranı "paid" gördüğünde 1 kez generate tetikleyecek (idempotent).
-    // Böylece verify/DB timing edge-case’leri yüzünden generate’in boşa düşmesini engelliyoruz.
 
     // (Debug amaçlı bilgi)
     if (!kReleaseMode) {
@@ -142,8 +154,7 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
         if (debugUseStoreIap) {
           await _payStoreIap();
         } else {
-          // Debug'da store kullanmıyorsan:
-          // Direct processing ekranına geç (Processing gerekirse generate’i tetikler)
+          // Debug'da store kullanmıyorsan processing’e geç (generate’i processing tetikler)
           await _goProcessing();
         }
       }
@@ -204,7 +215,25 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
                           "Tutar: ${_amount.toStringAsFixed(0)} ₺",
                           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
                         ),
+                        const SizedBox(height: 4),
+                        Text(
+                          "+ vergiler",
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.78),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
                         const SizedBox(height: 6),
+                        Text(
+                          "Vergiler Google Play tarafından ödeme sırasında eklenir.",
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.70),
+                            fontSize: 12,
+                            height: 1.2,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
                         if (!kReleaseMode)
                           Text(
                             "SKU: $_sku",
