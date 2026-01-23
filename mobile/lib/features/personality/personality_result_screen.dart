@@ -290,7 +290,7 @@ class _PersonalityResultScreenState extends State<PersonalityResultScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFFF5C361),
                       foregroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadiusRadius.circular(16)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     ),
                     onPressed: _goHome,
                     child: const Text("Ana Sayfaya Dön", style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900)),

@@ -92,8 +92,11 @@ class _BirthChartFormScreenState extends State<BirthChartFormScreen> {
       );
 
       if (!mounted) return;
+
       Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => BirthChartPaymentScreen(reading: reading)),
+        MaterialPageRoute(
+          builder: (_) => BirthChartPaymentScreen(readingId: reading.id),
+        ),
       );
     } catch (e) {
       if (!mounted) return;

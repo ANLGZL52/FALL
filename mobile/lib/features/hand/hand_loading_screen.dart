@@ -27,50 +27,21 @@ class _HandLoadingScreenState extends State<HandLoadingScreen> {
     return s.contains(' $code ') || s.contains('$code /') || s.contains(':$code');
   }
 
-  String _pickText(dynamic reading) {
-    try {
-      // HandReading içinde olabilecek alanlar:
-      // - resultText
-      // - result_text
-      // - comment
-      final m = reading as dynamic;
-
-      final a = (m.resultText ?? '').toString().trim();
-      if (a.isNotEmpty) return a;
-
-      final b = (m.result_text ?? '').toString().trim();
-      if (b.isNotEmpty) return b;
-
-      final c = (m.comment ?? '').toString().trim();
-      if (c.isNotEmpty) return c;
-    } catch (_) {}
-
-    return '';
-  }
-
   Future<void> _run() async {
     try {
       final deviceId = await DeviceIdService.getOrCreate();
 
+      // ✅ generate için retry/backoff
       const maxTry = 6;
       const baseDelayMs = 900;
 
-      String text = '';
-
       for (var i = 1; i <= maxTry; i++) {
         try {
-          final reading = await HandApi.generate(
-            readingId: widget.readingId,
-            deviceId: deviceId,
-          );
-
-          text = _pickText(reading);
-          if (text.isEmpty) {
-            throw Exception('generate: yorum boş döndü');
-          }
+          // ✅ Sende HandApi.generate var (generateText yok)
+          await HandApi.generate(readingId: widget.readingId, deviceId: deviceId);
           break;
         } catch (e) {
-          final retryable = _isHttp(e, 402) || _isHttp(e, 409);
+          final retryable = _isHttp(e, 400) || _isHttp(e, 402) || _isHttp(e, 409);
           if (retryable && i < maxTry) {
             await Future.delayed(Duration(milliseconds: baseDelayMs * i));
             continue;
@@ -81,8 +52,9 @@ class _HandLoadingScreenState extends State<HandLoadingScreen> {
 
       if (!mounted) return;
 
+      // ✅ Result screen readingId ile açılıyor
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => HandResultScreen(resultText: text)),
+        MaterialPageRoute(builder: (_) => HandResultScreen(readingId: widget.readingId)),
         (route) => false,
       );
     } catch (e) {
@@ -113,7 +85,7 @@ class _HandLoadingScreenState extends State<HandLoadingScreen> {
                   CircularProgressIndicator(),
                   SizedBox(height: 16),
                   Text(
-                    'Çizgiler okunuyor...\nEl falın hazırlanıyor.',
+                    'El falın hazırlanıyor…',
                     textAlign: TextAlign.center,
                   ),
                 ],

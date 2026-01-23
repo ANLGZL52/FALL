@@ -35,11 +35,19 @@ class RatingRequest(BaseModel):
     rating: int
 
 
+ALLOWED_STATUSES = {"pending_payment", "photos_uploaded", "paid", "processing", "completed"}
+
+
 def _get_or_404(session: Session, reading_id: str) -> CoffeeReadingDB:
     r = get_reading(session, reading_id)
     if not r:
         raise HTTPException(status_code=404, detail="Reading not found")
     return r
+
+
+def _safe_status(s: Optional[str]) -> str:
+    s = (s or "").strip()
+    return s if s in ALLOWED_STATUSES else "pending_payment"
 
 
 def _to_schema(r: CoffeeReadingDB) -> CoffeeReading:
@@ -53,12 +61,12 @@ def _to_schema(r: CoffeeReadingDB) -> CoffeeReading:
         name=r.name,
         age=r.age,
         photos=photos,
-        status=r.status,
+        status=_safe_status(getattr(r, "status", None)),
         comment=result,
         result_text=result,
-        rating=r.rating,
-        is_paid=r.is_paid,
-        payment_ref=r.payment_ref,
+        rating=getattr(r, "rating", None),
+        is_paid=bool(getattr(r, "is_paid", False)),
+        payment_ref=getattr(r, "payment_ref", None),
         created_at=r.created_at,
     )
 
@@ -87,7 +95,8 @@ async def start(req: CoffeeStartRequest, session: Session = Depends(get_session)
         question=req.question,
         name=req.name,
         age=req.age,
-        status="started",
+        # ✅ CoffeeStatus ile uyumlu OLMALI
+        status="pending_payment",
         is_paid=False,
         payment_ref=None,
         result_text=None,
