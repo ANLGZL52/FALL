@@ -26,34 +26,40 @@ class Settings(BaseSettings):
     environment: str = Field(default="dev", alias="ENVIRONMENT")
     debug: bool = Field(default=False, alias="DEBUG")
 
+    # Storage
     storage_dir: Path = Field(default=BASE_DIR / "storage", alias="STORAGE_DIR")
     upload_dir: Optional[Path] = Field(default=None, alias="UPLOAD_DIR")
 
+    # DB
     database_url: str = Field(
         default=f"sqlite:///{(BASE_DIR / 'storage' / 'fall.db').as_posix()}",
         alias="DATABASE_URL",
     )
 
-    # ===== OpenAI =====
+    # OpenAI
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-4.1-mini", alias="OPENAI_MODEL")
     openai_max_output_tokens: int = Field(default=2500, alias="OPENAI_MAX_OUTPUT_TOKENS")
 
-    # ✅ NEW: timeout / retry (Railway için)
+    # Railway için timeout / retry
     openai_timeout_seconds: int = Field(default=90, alias="OPENAI_TIMEOUT_SECONDS")
     openai_max_retries: int = Field(default=2, alias="OPENAI_MAX_RETRIES")
 
+    # CORS
     cors_origins_raw: str = Field(default="*", alias="CORS_ORIGINS")
 
+    # IAP
     allow_stub_iap: bool = Field(default=False, alias="ALLOW_STUB_IAP")
     google_play_package_name: str = Field(default="", alias="GOOGLE_PLAY_PACKAGE_NAME")
     apple_bundle_id: str = Field(default="", alias="APPLE_BUNDLE_ID")
 
+    # Coffee/Hand foto kuralı
     min_photos: int = 3
     max_photos: int = 5
 
     @property
     def upload_dir_effective(self) -> Path:
+        # UPLOAD_DIR env yoksa: storage/uploads
         return self.upload_dir or (self.storage_dir / "uploads")
 
     @property

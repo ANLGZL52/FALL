@@ -35,19 +35,11 @@ class RatingRequest(BaseModel):
     rating: int
 
 
-ALLOWED_STATUSES = {"pending_payment", "photos_uploaded", "paid", "processing", "completed"}
-
-
 def _get_or_404(session: Session, reading_id: str) -> CoffeeReadingDB:
     r = get_reading(session, reading_id)
     if not r:
         raise HTTPException(status_code=404, detail="Reading not found")
     return r
-
-
-def _safe_status(s: Optional[str]) -> str:
-    s = (s or "").strip()
-    return s if s in ALLOWED_STATUSES else "pending_payment"
 
 
 def _to_schema(r: CoffeeReadingDB) -> CoffeeReading:
@@ -61,12 +53,12 @@ def _to_schema(r: CoffeeReadingDB) -> CoffeeReading:
         name=r.name,
         age=r.age,
         photos=photos,
-        status=_safe_status(getattr(r, "status", None)),
+        status=r.status,
         comment=result,
         result_text=result,
-        rating=getattr(r, "rating", None),
-        is_paid=bool(getattr(r, "is_paid", False)),
-        payment_ref=getattr(r, "payment_ref", None),
+        rating=r.rating,
+        is_paid=r.is_paid,
+        payment_ref=r.payment_ref,
         created_at=r.created_at,
     )
 
@@ -83,19 +75,18 @@ def _delete_paths(paths: List[str]) -> None:
 @router.post("/start", response_model=CoffeeReading)
 async def start(req: CoffeeStartRequest, session: Session = Depends(get_session)):
     """
-    Kahve okumasını başlatır.
     Akış:
-      1) /coffee/start -> reading_id
-      2) /coffee/{id}/upload-images -> foto yükle
-      3) Store ödeme -> /payments/intent + /payments/verify (paid işaretlenir)
-      4) /coffee/{id}/generate -> yorum üret
+      1) /coffee/start -> reading_id (pending_payment)
+      2) /coffee/{id}/upload-images -> foto yükle (photos_uploaded)
+      3) Store ödeme -> /payments/intent + /payments/verify (paid)
+      4) /coffee/{id}/generate -> yorum üret (processing -> completed)
     """
     db_obj = CoffeeReadingDB(
         topic=req.topic,
         question=req.question,
         name=req.name,
         age=req.age,
-        # ✅ CoffeeStatus ile uyumlu OLMALI
+        # ✅ CoffeeStatus Literal ile uyumlu olmalı:
         status="pending_payment",
         is_paid=False,
         payment_ref=None,
@@ -126,21 +117,24 @@ async def upload_images(
 
     saved = await save_uploads(reading_id, files)
 
-    # ✅ Upload sonrası doğrulama
+    # ✅ Upload sonrası doğrulama: kahve fincanı içi mi?
     verdict = validate_coffee_images(saved)
     if not verdict.get("ok", False):
         _delete_paths(saved)
-        reason = verdict.get("reason", "Görseller kahve fincanı içi değil.")
-        raise HTTPException(status_code=400, detail=reason)
+        # ✅ Kullanıcı dostu mesaj
+        raise HTTPException(
+            status_code=400,
+            detail="Lütfen yalnızca kahve fincanının iç kısmının fotoğrafını yükleyiniz.",
+        )
 
-    r = set_photos(session, reading_id, saved)
+    r = set_photos(session, reading_id, saved)  # status -> photos_uploaded
     return _to_schema(r)
 
 
 @router.post("/{reading_id}/mark-paid", response_model=CoffeeReading)
 async def mark_paid(reading_id: str, body: MarkPaidRequest, session: Session = Depends(get_session)):
     """
-    ✅ Legacy/mock akış (TEST-...)
+    ✅ Legacy/mock akış (TEST-...).
     Real ödeme: /payments/verify.
     """
     r = _get_or_404(session, reading_id)
@@ -173,7 +167,6 @@ async def mark_paid(reading_id: str, body: MarkPaidRequest, session: Session = D
 @router.post("/{reading_id}/generate", response_model=CoffeeReading)
 async def generate(reading_id: str, session: Session = Depends(get_session)):
     """
-    ✅ Tarot standardı ile uyumlu generate:
     - Foto yoksa 400
     - Ödeme yoksa 402
     - Sonuç varsa idempotent dön
@@ -186,32 +179,30 @@ async def generate(reading_id: str, session: Session = Depends(get_session)):
     if not photos:
         raise HTTPException(status_code=400, detail="No photos uploaded")
 
-    # 🔒 ödeme zorunlu: 402
     if not r.is_paid:
         raise HTTPException(status_code=402, detail="Payment Required")
 
     status = (r.status or "").lower().strip()
     result_text = (getattr(r, "result_text", None) or "").strip()
 
-    # ✅ idempotent: sonuç varsa direkt dön
-    if result_text and status in ("completed", "done"):
-        return _to_schema(r)
-
-    # ✅ sonuç var ama status farklıysa da dön (minimum risk)
-    if result_text and status not in ("completed", "done"):
+    # ✅ idempotent
+    if result_text:
         return _to_schema(r)
 
     # ✅ processing ise tekrar OpenAI çağırma
     if status == "processing":
         return _to_schema(r)
 
-    # ✅ bir kez daha doğrula
+    # ✅ bir kez daha doğrula (edge-case)
     verdict = validate_coffee_images(photos)
     if not verdict.get("ok", False):
-        raise HTTPException(status_code=400, detail=verdict.get("reason", "Görseller kahve fincanı içi değil."))
+        raise HTTPException(
+            status_code=400,
+            detail="Lütfen yalnızca kahve fincanının iç kısmının fotoğrafını yükleyiniz.",
+        )
 
     # processing
-    r = set_status(session, reading_id, "processing")
+    set_status(session, reading_id, "processing")
 
     try:
         comment = generate_fortune(
@@ -220,24 +211,25 @@ async def generate(reading_id: str, session: Session = Depends(get_session)):
             question=r.question,
             image_paths=photos,
         )
-
         comment = (comment or "").strip()
 
         if comment == "Görseller kahve fincanı içi görünmüyor.":
             set_status(session, reading_id, "paid", comment=None)
-            raise HTTPException(status_code=400, detail="Görseller kahve fincanı içi görünmüyor.")
+            raise HTTPException(
+                status_code=400,
+                detail="Lütfen yalnızca kahve fincanının iç kısmının fotoğrafını yükleyiniz.",
+            )
 
         if not comment:
             set_status(session, reading_id, "paid", comment=None)
             raise HTTPException(status_code=500, detail="Yorum üretilemedi (boş sonuç).")
 
-        r = set_status(session, reading_id, "completed", comment=comment)
-        return _to_schema(r)
+        r2 = set_status(session, reading_id, "completed", comment=comment)
+        return _to_schema(r2)
 
     except HTTPException:
         raise
     except Exception as e:
-        # ✅ hata olursa paid'e geri çek
         try:
             set_status(session, reading_id, "paid", comment=None)
         except Exception:

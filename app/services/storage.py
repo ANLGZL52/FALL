@@ -12,7 +12,6 @@ from app.core.config import settings
 
 
 def _safe_filename(original: str) -> str:
-    # uzantıyı koru
     original = (original or "").strip()
     ext = Path(original).suffix.lower()
     if ext not in [".jpg", ".jpeg", ".png", ".webp"]:
@@ -22,10 +21,14 @@ def _safe_filename(original: str) -> str:
 
 async def save_uploads(reading_id: str, files: List[UploadFile]) -> List[str]:
     """
-    Dosyaları diske yazar ve JSON/DB için string path listesi döndürür.
-    DÖNÜŞ: ["storage/uploads/<reading_id>/<filename>.jpg", ...]
+    Dosyaları diske yazar ve DB için relative path listesi döndürür.
+
+    DÖNÜŞ:
+      ["storage/uploads/<reading_id>/<filename>.jpg", ...]  (relative)
     """
-    dest_dir = settings.upload_dir / reading_id
+
+    # ✅ KRİTİK FIX: upload_dir None olabilir (Railway). Effective path kullan.
+    dest_dir = settings.upload_dir_effective / reading_id
     dest_dir.mkdir(parents=True, exist_ok=True)
 
     saved_paths: List[str] = []
@@ -34,14 +37,13 @@ async def save_uploads(reading_id: str, files: List[UploadFile]) -> List[str]:
         filename = _safe_filename(f.filename)
         dest_path = dest_dir / filename
 
-        # dosyayı yaz
         data = await f.read()
         with open(dest_path, "wb") as out:
             out.write(data)
 
-        # ✅ DB'ye relative path kaydediyoruz (proje kökünden)
+        # ✅ DB'ye relative path kaydediyoruz
         rel_path = os.path.relpath(dest_path, start=Path("."))
-        rel_path = rel_path.replace("\\", "/")  # windows uyumu
+        rel_path = rel_path.replace("\\", "/")
         saved_paths.append(rel_path)
 
     return saved_paths
