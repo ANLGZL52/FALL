@@ -31,7 +31,6 @@ def create_reading(session: Session, r: CoffeeReadingDB) -> CoffeeReadingDB:
 
 
 def update_reading(session: Session, r: CoffeeReadingDB) -> CoffeeReadingDB:
-    # updated_at varsa güncelle
     if hasattr(r, "updated_at"):
         r.updated_at = datetime.utcnow()  # type: ignore[attr-defined]
     session.add(r)
@@ -41,10 +40,8 @@ def update_reading(session: Session, r: CoffeeReadingDB) -> CoffeeReadingDB:
 
 
 def _get_images_json_field(r: CoffeeReadingDB) -> str:
-    # Yeni alan: images_json
     if hasattr(r, "images_json"):
         return getattr(r, "images_json") or "[]"
-    # Eski alan: photos_json (geriye dönük)
     if hasattr(r, "photos_json"):
         return getattr(r, "photos_json") or "[]"
     return "[]"
@@ -87,14 +84,12 @@ def set_status(
 
     r.status = status
 
-    # yorum alanı DB'de result_text
     if comment is not None:
         if hasattr(r, "result_text"):
             r.result_text = comment
         elif hasattr(r, "comment"):
-            r.comment = comment  # geriye dönük
+            r.comment = comment
         else:
-            # hiç yoksa görmezden gel
             pass
 
     return update_reading(session, r)

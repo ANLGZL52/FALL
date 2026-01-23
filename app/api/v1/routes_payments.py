@@ -143,7 +143,10 @@ def _unlock_reading_for_product(
     ✅ CRITICAL: unlock işlemi idempotent olmalı.
     Yani tekrar çağrılırsa zarar vermemeli.
     """
-    # Tarot: kart seçimi şart
+
+    # -------------------------
+    # TAROT (kart seçimi şart)
+    # -------------------------
     if product == "tarot":
         r = tarot_repo.get_reading(session, reading_id)
         if not r:
@@ -151,6 +154,7 @@ def _unlock_reading_for_product(
         if not r.get_cards():
             raise HTTPException(status_code=400, detail="Cards must be selected before verifying payment")
 
+        # idempotent unlock
         r.is_paid = True
         r.payment_ref = payment_ref
         r.status = "paid"
@@ -158,7 +162,9 @@ def _unlock_reading_for_product(
         tarot_repo.update_reading(session, r)
         return
 
-    # Hand: foto şart
+    # -------------------------
+    # HAND (foto şart)
+    # -------------------------
     if product == "hand":
         r = hand_get_reading(session, reading_id)
         if not r:
@@ -167,6 +173,7 @@ def _unlock_reading_for_product(
         if not photos:
             raise HTTPException(status_code=400, detail="Photos must be uploaded before verifying payment")
 
+        # idempotent unlock
         r.is_paid = True
         r.payment_ref = payment_ref
         r.status = "paid"
@@ -174,7 +181,9 @@ def _unlock_reading_for_product(
         hand_update_reading(session, r)
         return
 
-    # Coffee: foto şart
+    # -------------------------
+    # COFFEE (foto şart)
+    # -------------------------
     if product == "coffee":
         r = coffee_get_reading(session, reading_id)
         if not r:
@@ -183,6 +192,7 @@ def _unlock_reading_for_product(
         if not photos:
             raise HTTPException(status_code=400, detail="Photos must be uploaded before verifying payment")
 
+        # idempotent unlock
         r.is_paid = True
         r.payment_ref = payment_ref
         r.status = "paid"
@@ -190,7 +200,9 @@ def _unlock_reading_for_product(
         coffee_update_reading(session, r)
         return
 
-    # Numerology
+    # -------------------------
+    # NUMEROLOGY
+    # -------------------------
     if product == "numerology":
         nrepo = NumerologyRepo()
         obj = nrepo.get(session=session, reading_id=reading_id)
@@ -200,7 +212,9 @@ def _unlock_reading_for_product(
             raise HTTPException(status_code=500, detail="Numerology mark_paid failed")
         return
 
-    # Birthchart
+    # -------------------------
+    # BIRTHCHART
+    # -------------------------
     if product == "birthchart":
         reading = birthchart_repo.get(session=session, reading_id=reading_id)
         if not reading:
@@ -209,7 +223,9 @@ def _unlock_reading_for_product(
             raise HTTPException(status_code=500, detail="Birthchart mark_paid failed")
         return
 
-    # Personality
+    # -------------------------
+    # PERSONALITY
+    # -------------------------
     if product == "personality":
         reading = personality_repo.get(session=session, reading_id=reading_id)
         if not reading:
@@ -218,7 +234,9 @@ def _unlock_reading_for_product(
             raise HTTPException(status_code=500, detail="Personality mark_paid failed")
         return
 
-    # Synastry
+    # -------------------------
+    # SYNASTRY
+    # -------------------------
     if product == "synastry":
         reading = synastry_repo.get(session=session, reading_id=reading_id)
         if not reading:

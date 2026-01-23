@@ -1,3 +1,4 @@
+// mobile/lib/services/coffee_api.dart
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
@@ -8,7 +9,6 @@ import 'api_base.dart';
 class CoffeeApi {
   static String get _base => ApiBase.baseUrl;
 
-  // ✅ zaman aşımı ayarları (Google Play + mobil ağlar için kritik)
   static const Duration _defaultTimeout = Duration(seconds: 30);
   static const Duration _uploadTimeout = Duration(seconds: 90);
   static const Duration _generateTimeout = Duration(seconds: 150);
@@ -59,7 +59,6 @@ class CoffeeApi {
     return CoffeeReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
-  /// ✅ Backend endpoint: /upload-images
   static Future<CoffeeReading> uploadImages({
     required String readingId,
     required List<File> files,
@@ -87,7 +86,6 @@ class CoffeeApi {
     return CoffeeReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
-  /// ✅ ESKİ KODLAR BOZULMASIN diye ALIAS
   static Future<CoffeeReading> uploadPhotos({
     required String readingId,
     List<File>? files,
@@ -149,7 +147,6 @@ class CoffeeApi {
     return CoffeeReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
-  /// ✅ CoffeeReading.fromJson zaten comment/result_text'i `comment` alanına map ediyor.
   static Future<String> generateText({
     required String readingId,
     String? deviceId,
@@ -158,7 +155,6 @@ class CoffeeApi {
     final String text = (reading.comment ?? '').trim();
 
     if (text.isEmpty) {
-      // daha net mesaj
       throw Exception('generateText: yorum boş döndü (backend comment/result_text üretmedi)');
     }
 
@@ -183,6 +179,27 @@ class CoffeeApi {
     }
 
     return CoffeeReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
+
+  /// ✅ raw map (foto var mı kontrolü için)
+  static Future<Map<String, dynamic>> detailRaw({
+    required String readingId,
+    String? deviceId,
+  }) async {
+    final uri = Uri.parse('$_base/coffee/$readingId');
+
+    final res = await http
+        .get(
+          uri,
+          headers: ApiBase.headers(deviceId: deviceId),
+        )
+        .timeout(_defaultTimeout);
+
+    if (res.statusCode != 200) {
+      throw Exception('coffee/detail failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
+    }
+
+    return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   static Future<CoffeeReading> rate({

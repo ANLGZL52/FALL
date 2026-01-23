@@ -30,6 +30,8 @@ class _TarotProcessingScreenState extends State<TarotProcessingScreen> {
   Timer? _timer;
 
   bool _done = false;
+
+  // Kullanıcıya sadece gerçek hata olursa göster
   bool _error = false;
   String? _errorMsg;
 
@@ -37,12 +39,13 @@ class _TarotProcessingScreenState extends State<TarotProcessingScreen> {
   static const int _pollSec = 2;
 
   bool _generateTriggered = false;
-
-  // ✅ processing -> paid/selected geri düşerse (OpenAI hata/timeout) tekrar generate tetikle
   String _lastStatus = '';
 
-  static const int _warnSec = 18;
-  static const int _hardWarnSec = 40;
+  // ✅ Kullanıcıyı tedirgin etmeyelim:
+  // Uyarı metni yok. Sadece uzun sürerse içeride sessiz retry yapacağız.
+  static const int _silentRetryStartSec = 35;  // 35sn sonra
+  static const int _silentRetryEverySec = 18;  // 18sn'de bir tekrar dene
+  int _lastSilentRetryAt = 0;
 
   @override
   void initState() {
@@ -59,6 +62,7 @@ class _TarotProcessingScreenState extends State<TarotProcessingScreen> {
   Future<void> _startPolling() async {
     _timer?.cancel();
     _elapsed = 0;
+    _lastSilentRetryAt = 0;
     _timer = Timer.periodic(const Duration(seconds: _pollSec), (_) => _pollOnce());
     await _pollOnce();
   }
@@ -83,6 +87,7 @@ class _TarotProcessingScreenState extends State<TarotProcessingScreen> {
       final text = (d['result_text'] ?? '').toString().trim();
       final isPaid = _asBool(d['is_paid']);
 
+      // ✅ Sonuç geldiyse bitir
       if (status == 'completed' && text.isNotEmpty) {
         _done = true;
         if (!mounted) return;
@@ -100,13 +105,27 @@ class _TarotProcessingScreenState extends State<TarotProcessingScreen> {
         return;
       }
 
-      // ✅ status'a takılma:
-      // is_paid == true ise generate tetiklenebilir (selected/paid fark etmez)
-      final cameBackFromProcessing = (_lastStatus == 'processing' && (status == 'paid' || status == 'selected'));
+      // ✅ is_paid == true ise generate tetiklenebilir
+      final cameBackFromProcessing =
+          (_lastStatus == 'processing' && (status == 'paid' || status == 'selected'));
 
+      // 1) İlk tetikleme (normal)
       if (isPaid && (!_generateTriggered || cameBackFromProcessing)) {
-        // processing'te değilse tetiklemeyi dene
         if (status != 'processing') {
+          _generateTriggered = true;
+          await TarotApi.generate(readingId: widget.readingId, deviceId: deviceId);
+        }
+      }
+
+      // 2) ✅ Sessiz otomatik retry (kullanıcıya buton göstermeden)
+      // Uzun sürerse, belirli aralıklarla generate’i tekrar dene.
+      if (isPaid &&
+          _elapsed >= _silentRetryStartSec &&
+          (_elapsed - _lastSilentRetryAt) >= _silentRetryEverySec) {
+        // processing'te takılı kalmasın diye:
+        // status processing değilse generate dene
+        if (status != 'processing') {
+          _lastSilentRetryAt = _elapsed;
           _generateTriggered = true;
           await TarotApi.generate(readingId: widget.readingId, deviceId: deviceId);
         }
@@ -114,13 +133,15 @@ class _TarotProcessingScreenState extends State<TarotProcessingScreen> {
 
       _lastStatus = status;
 
-      if (mounted) {
+      // ✅ Sorunsuz polling -> kullanıcıya hata gösterme
+      if (mounted && _error) {
         setState(() {
           _error = false;
           _errorMsg = null;
         });
       }
     } catch (e) {
+      // Sadece gerçekten HTTP/network hatası olursa göster
       if (mounted) {
         setState(() {
           _error = true;
@@ -153,9 +174,6 @@ class _TarotProcessingScreenState extends State<TarotProcessingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final warn = _elapsed >= _warnSec;
-    final hardWarn = _elapsed >= _hardWarnSec;
-
     return MysticScaffold(
       scrimOpacity: 0.84,
       patternOpacity: 0.16,
@@ -167,24 +185,27 @@ class _TarotProcessingScreenState extends State<TarotProcessingScreen> {
           children: [
             const SizedBox(width: 56, height: 56, child: CircularProgressIndicator()),
             const SizedBox(height: 16),
+
+            // ✅ Kullanıcıya hep sakin mesaj
             Text(
               _error ? 'Bağlantı sorunu oluştu' : 'Tarot yorumun hazırlanıyor…',
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
+
             Text(
               _error
                   ? (_errorMsg ?? 'Bilinmeyen hata')
-                  : (hardWarn
-                      ? 'Beklenenden uzun sürdü. İstersen yeniden tetikleyebilirsin.'
-                      : (warn
-                          ? 'Bu açılım biraz uzun sürebilir. Ekranda kalırsan otomatik açılacak.'
-                          : 'Genelde birkaç saniye içinde hazır olur.')),
+                  : 'Genelde kısa sürede hazır olur. Lütfen bu ekranda kal.',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white.withOpacity(0.75), height: 1.25),
             ),
+
             const SizedBox(height: 16),
+
+            // ✅ “Yeniden Tetikle” BUTONUNU kullanıcıya normalde göstermiyoruz.
+            // Sadece gerçek bir hata varsa “Tekrar Dene” ve isterse tetikleme.
             if (_error)
               SizedBox(
                 width: double.infinity,
@@ -199,12 +220,15 @@ class _TarotProcessingScreenState extends State<TarotProcessingScreen> {
                   child: const Text('Tekrar Dene'),
                 ),
               ),
-            if (!_error && hardWarn)
+
+            if (_error) const SizedBox(height: 10),
+
+            if (_error)
               SizedBox(
                 width: double.infinity,
-                child: ElevatedButton(
+                child: OutlinedButton(
                   onPressed: _forceRetryGenerate,
-                  child: const Text('Yeniden Tetikle'),
+                  child: const Text('Yeniden Başlat'),
                 ),
               ),
           ],

@@ -74,12 +74,20 @@ def _delete_paths(paths: List[str]) -> None:
 
 @router.post("/start", response_model=CoffeeReading)
 async def start(req: CoffeeStartRequest, session: Session = Depends(get_session)):
+    """
+    Kahve okumasını başlatır.
+    Akış:
+      1) /coffee/start -> reading_id
+      2) /coffee/{id}/upload-images -> foto yükle
+      3) Store ödeme -> /payments/intent + /payments/verify (paid işaretlenir)
+      4) /coffee/{id}/generate -> yorum üret
+    """
     db_obj = CoffeeReadingDB(
         topic=req.topic,
         question=req.question,
         name=req.name,
         age=req.age,
-        status="pending_payment",
+        status="started",
         is_paid=False,
         payment_ref=None,
         result_text=None,
@@ -100,7 +108,7 @@ async def upload_images(
 ):
     _get_or_404(session, reading_id)
 
-    # ✅ 3-5 foto kuralı (config’ten)
+    # ✅ 3-5 foto kuralı
     if len(files) < settings.min_photos or len(files) > settings.max_photos:
         raise HTTPException(
             status_code=400,
@@ -109,7 +117,7 @@ async def upload_images(
 
     saved = await save_uploads(reading_id, files)
 
-    # ✅ Upload sonrası DOĞRULAMA: kahve fincanı içi mi?
+    # ✅ Upload sonrası doğrulama
     verdict = validate_coffee_images(saved)
     if not verdict.get("ok", False):
         _delete_paths(saved)
@@ -123,27 +131,25 @@ async def upload_images(
 @router.post("/{reading_id}/mark-paid", response_model=CoffeeReading)
 async def mark_paid(reading_id: str, body: MarkPaidRequest, session: Session = Depends(get_session)):
     """
-    ✅ Legacy/mock akış bozulmasın diye endpoint duruyor.
-    🔒 Ama güvenlik için sadece TEST-... (mock) ödeme referansı ile çalışır.
-    Store/IAP akışında paid işaretini /payments/verify server-side yapar.
+    ✅ Legacy/mock akış (TEST-...)
+    Real ödeme: /payments/verify.
     """
     r = _get_or_404(session, reading_id)
 
-    # ✅ ekstra güvenlik: foto yoksa ödeme yok
+    # ✅ foto yoksa ödeme yok
     if not list_photos(r):
         raise HTTPException(status_code=400, detail="Ödeme için önce fotoğraf yüklemelisin.")
 
     if not body.payment_ref:
         raise HTTPException(status_code=422, detail="payment_ref is required")
 
-    # 🔒 Sadece legacy/mock izin
     if not str(body.payment_ref).startswith("TEST-"):
         raise HTTPException(
             status_code=403,
             detail="mark-paid is legacy only. Use /payments/verify for real payments.",
         )
 
-    # idempotent
+    # ✅ idempotent
     if r.is_paid and r.payment_ref:
         return _to_schema(r)
 
@@ -157,38 +163,77 @@ async def mark_paid(reading_id: str, body: MarkPaidRequest, session: Session = D
 
 @router.post("/{reading_id}/generate", response_model=CoffeeReading)
 async def generate(reading_id: str, session: Session = Depends(get_session)):
+    """
+    ✅ Tarot standardı ile uyumlu generate:
+    - Foto yoksa 400
+    - Ödeme yoksa 402
+    - Sonuç varsa idempotent dön
+    - processing ise tekrar üretme
+    - Hata olursa status'u paid'e geri çek
+    """
     r = _get_or_404(session, reading_id)
 
     photos = list_photos(r)
     if not photos:
         raise HTTPException(status_code=400, detail="No photos uploaded")
 
+    # 🔒 ödeme zorunlu: 402
     if not r.is_paid:
-        raise HTTPException(status_code=400, detail="Payment required before reading")
+        raise HTTPException(status_code=402, detail="Payment Required")
 
-    # idempotent
-    if r.status == "completed" and getattr(r, "result_text", None):
+    status = (r.status or "").lower().strip()
+    result_text = (getattr(r, "result_text", None) or "").strip()
+
+    # ✅ idempotent: sonuç varsa direkt dön
+    if result_text and status in ("completed", "done"):
         return _to_schema(r)
 
+    # ✅ sonuç var ama status farklıysa da dön (minimum risk)
+    if result_text and status not in ("completed", "done"):
+        return _to_schema(r)
+
+    # ✅ processing ise tekrar OpenAI çağırma
+    if status == "processing":
+        return _to_schema(r)
+
+    # ✅ bir kez daha doğrula
     verdict = validate_coffee_images(photos)
     if not verdict.get("ok", False):
         raise HTTPException(status_code=400, detail=verdict.get("reason", "Görseller kahve fincanı içi değil."))
 
+    # processing
     r = set_status(session, reading_id, "processing")
 
-    comment = generate_fortune(
-        name=r.name,
-        topic=r.topic,
-        question=r.question,
-        image_paths=photos,
-    )
+    try:
+        comment = generate_fortune(
+            name=r.name,
+            topic=r.topic,
+            question=r.question,
+            image_paths=photos,
+        )
 
-    if comment.strip() == "Görseller kahve fincanı içi görünmüyor.":
-        r = set_status(session, reading_id, "paid", comment=None)
-        raise HTTPException(status_code=400, detail="Görseller kahve fincanı içi görünmüyor.")
+        comment = (comment or "").strip()
 
-    r = set_status(session, reading_id, "completed", comment=comment)
-    return _to_schema(r)
+        if comment == "Görseller kahve fincanı içi görünmüyor.":
+            set_status(session, reading_id, "paid", comment=None)
+            raise HTTPException(status_code=400, detail="Görseller kahve fincanı içi görünmüyor.")
+
+        if not comment:
+            set_status(session, reading_id, "paid", comment=None)
+            raise HTTPException(status_code=500, detail="Yorum üretilemedi (boş sonuç).")
+
+        r = set_status(session, reading_id, "completed", comment=comment)
+        return _to_schema(r)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        # ✅ hata olursa paid'e geri çek
+        try:
+            set_status(session, reading_id, "paid", comment=None)
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"Kahve falı yorum üretilemedi: {e}")
 
 
 @router.get("/{reading_id}", response_model=CoffeeReading)

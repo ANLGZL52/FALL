@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../services/coffee_api.dart';
 import '../../services/device_id_service.dart';
 import '../../widgets/glass_card.dart';
 import '../../widgets/mystic_scaffold.dart';
+
 import 'coffee_result_screen.dart';
 import '../home/home_screen.dart';
 
@@ -16,81 +18,204 @@ class CoffeeLoadingScreen extends StatefulWidget {
 }
 
 class _CoffeeLoadingScreenState extends State<CoffeeLoadingScreen> {
+  Timer? _timer;
+
+  bool _done = false;
+  bool _error = false;
+  String? _errorMsg;
+
+  int _elapsed = 0;
+  static const int _pollSec = 2;
+
+  bool _generateTriggered = false;
+  String _lastStatus = '';
+
+  static const int _hardWarnSec = 45;
+
   @override
   void initState() {
     super.initState();
-    _run();
+    _startPolling();
   }
 
-  bool _isHttp(Object e, int code) {
-    final s = e.toString();
-    return s.contains(' $code ') || s.contains('$code /') || s.contains(':$code');
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
   }
 
-  Future<void> _run() async {
+  bool _asBool(dynamic v) {
+    if (v is bool) return v;
+    if (v is num) return v != 0;
+    final s = (v ?? '').toString().toLowerCase().trim();
+    return s == 'true' || s == '1' || s == 'yes';
+  }
+
+  Future<void> _startPolling() async {
+    _timer?.cancel();
+    _elapsed = 0;
+    _timer = Timer.periodic(const Duration(seconds: _pollSec), (_) => _pollOnce());
+    await _pollOnce();
+  }
+
+  Future<void> _pollOnce() async {
+    if (_done) return;
+
+    _elapsed += _pollSec;
+
     try {
       final deviceId = await DeviceIdService.getOrCreate();
+      final d = await CoffeeApi.detailRaw(readingId: widget.readingId, deviceId: deviceId);
 
-      // ✅ generate için retry/backoff (verify sonrası DB işareti gecikebilir)
-      const maxTry = 6;
-      const baseDelayMs = 900;
+      final status = (d['status'] ?? '').toString().trim();
+      final isPaid = _asBool(d['is_paid']);
 
-      String text = '';
-      for (var i = 1; i <= maxTry; i++) {
-        try {
-          text = await CoffeeApi.generateText(
-            readingId: widget.readingId,
-            deviceId: deviceId,
-          );
-          break;
-        } catch (e) {
-          final retryable = _isHttp(e, 400) || _isHttp(e, 402) || _isHttp(e, 409);
-          if (retryable && i < maxTry) {
-            await Future.delayed(Duration(milliseconds: baseDelayMs * i));
-            continue;
-          }
-          rethrow;
+      // Backend bazen comment, bazen result_text döndürebilir.
+      final text = ((d['comment'] ?? d['result_text']) ?? '').toString().trim();
+
+      // ✅ DONE/KOMPLE ise sonuç ekranı
+      if (text.isNotEmpty && (status == 'done' || status == 'completed')) {
+        _done = true;
+        if (!mounted) return;
+
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => CoffeeResultScreen(resultText: text)),
+          (route) => false,
+        );
+        return;
+      }
+
+      // ✅ Eğer processing -> paid'a geri düşerse (AI hata/timeout), tekrar generate tetikleyelim
+      final cameBackFromProcessing = (_lastStatus == 'processing' && status == 'paid');
+
+      // ✅ is_paid true ise, processing değilken generate tetiklenebilir
+      if (isPaid && (!_generateTriggered || cameBackFromProcessing)) {
+        if (status != 'processing') {
+          _generateTriggered = true;
+          // generate endpointi kendi içinde status'u processing yapmalı ve idempotent olmalı
+          await CoffeeApi.generate(readingId: widget.readingId, deviceId: deviceId);
         }
       }
 
-      if (!mounted) return;
+      _lastStatus = status;
 
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => CoffeeResultScreen(resultText: text)),
-        (route) => false,
-      );
+      if (mounted) {
+        setState(() {
+          _error = false;
+          _errorMsg = null;
+        });
+      }
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Yorum üretilemedi: $e')),
-      );
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => HomeScreen()),
-        (route) => false,
-      );
+      if (mounted) {
+        setState(() {
+          _error = true;
+          _errorMsg = e.toString();
+        });
+      }
     }
+  }
+
+  Future<void> _forceRetryGenerate() async {
+    try {
+      final deviceId = await DeviceIdService.getOrCreate();
+      _generateTriggered = true;
+      await CoffeeApi.generate(readingId: widget.readingId, deviceId: deviceId);
+      if (mounted) {
+        setState(() {
+          _error = false;
+          _errorMsg = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = true;
+          _errorMsg = e.toString();
+        });
+      }
+    }
+  }
+
+  Future<void> _goHomeWithToast() async {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Yorum üretilemedi. Ana sayfaya dönüldü.')),
+    );
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => HomeScreen()),
+      (route) => false,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final hardWarn = _elapsed >= _hardWarnSec;
+
     return MysticScaffold(
       scrimOpacity: 0.86,
       patternOpacity: 0.12,
+      appBar: AppBar(title: const Text('İşleniyor')),
       body: SafeArea(
         child: Center(
           child: SizedBox(
             width: 520,
             child: GlassCard(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: const [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 16),
-                  Text(
-                    'Fincandaki işaretler çözülüyor...\nFalın hazırlanıyor.',
-                    textAlign: TextAlign.center,
-                  ),
-                ],
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(width: 56, height: 56, child: CircularProgressIndicator()),
+                    const SizedBox(height: 14),
+                    Text(
+                      _error ? 'Bağlantı sorunu oluştu' : 'Fincandaki işaretler çözülüyor…',
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _error
+                          ? (_errorMsg ?? 'Bilinmeyen hata')
+                          : (hardWarn
+                              ? 'Beklenenden uzun sürdü. İstersen yeniden tetikleyebilirsin.'
+                              : 'Genelde birkaç saniye içinde hazır olur.'),
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white.withOpacity(0.75), height: 1.25),
+                    ),
+                    const SizedBox(height: 16),
+                    if (_error)
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: () async {
+                            setState(() {
+                              _error = false;
+                              _errorMsg = null;
+                            });
+                            await _startPolling();
+                          },
+                          child: const Text('Tekrar Dene'),
+                        ),
+                      ),
+                    if (!_error && hardWarn) ...[
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: _forceRetryGenerate,
+                          child: const Text('Yeniden Tetikle'),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton(
+                          onPressed: _goHomeWithToast,
+                          child: const Text('Ana Sayfa'),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
               ),
             ),
           ),
