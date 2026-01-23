@@ -1,4 +1,3 @@
-// mobile/lib/services/coffee_api.dart
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
@@ -8,6 +7,11 @@ import 'api_base.dart';
 
 class CoffeeApi {
   static String get _base => ApiBase.baseUrl;
+
+  // ✅ zaman aşımı ayarları (Google Play + mobil ağlar için kritik)
+  static const Duration _defaultTimeout = Duration(seconds: 30);
+  static const Duration _uploadTimeout = Duration(seconds: 90);
+  static const Duration _generateTimeout = Duration(seconds: 150);
 
   static String _extractErrorMessage(String body) {
     try {
@@ -28,7 +32,7 @@ class CoffeeApi {
     required String question,
     String? relationshipStatus,
     String? bigDecision,
-    String? deviceId, // opsiyonel
+    String? deviceId,
   }) async {
     final uri = Uri.parse('$_base/coffee/start');
     final body = {
@@ -40,11 +44,13 @@ class CoffeeApi {
       "big_decision": bigDecision,
     };
 
-    final res = await http.post(
-      uri,
-      headers: ApiBase.headers(deviceId: deviceId),
-      body: jsonEncode(body),
-    );
+    final res = await http
+        .post(
+          uri,
+          headers: ApiBase.headers(deviceId: deviceId),
+          body: jsonEncode(body),
+        )
+        .timeout(_defaultTimeout);
 
     if (res.statusCode != 200) {
       throw Exception('coffee/start failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
@@ -57,14 +63,12 @@ class CoffeeApi {
   static Future<CoffeeReading> uploadImages({
     required String readingId,
     required List<File> files,
-    String? deviceId, // opsiyonel
+    String? deviceId,
   }) async {
     final uri = Uri.parse('$_base/coffee/$readingId/upload-images');
     final req = http.MultipartRequest('POST', uri);
 
-    // Header'lar (multipart'ta Content-Type'ı paket ayarlar; biz sadece accept + device ekleyelim)
-    final headers = <String, String>{};
-    headers.addAll({"Accept": "application/json"});
+    final headers = <String, String>{"Accept": "application/json"};
     final d = (deviceId ?? '').trim();
     if (d.isNotEmpty) headers["X-Device-Id"] = d;
     req.headers.addAll(headers);
@@ -73,7 +77,7 @@ class CoffeeApi {
       req.files.add(await http.MultipartFile.fromPath('files', f.path));
     }
 
-    final streamed = await req.send();
+    final streamed = await req.send().timeout(_uploadTimeout);
     final res = await http.Response.fromStream(streamed);
 
     if (res.statusCode != 200) {
@@ -90,39 +94,33 @@ class CoffeeApi {
     List<File>? imageFiles,
     String? deviceId,
   }) {
-    final chosen = (files != null && files.isNotEmpty)
-        ? files
-        : (imageFiles ?? <File>[]);
-
+    final chosen = (files != null && files.isNotEmpty) ? files : (imageFiles ?? <File>[]);
     if (chosen.isEmpty) {
       throw Exception('uploadPhotos failed: files/imageFiles is empty');
     }
-
     return uploadImages(readingId: readingId, files: chosen, deviceId: deviceId);
   }
 
   /// ✅ LEGACY: mock akış için (TEST-...)
-  /// Real ödeme: /payments/verify server-side unlock yapıyor, burada çağırma.
   static Future<CoffeeReading> markPaid({
     required String readingId,
     String? paymentRef,
-    String? deviceId, // opsiyonel
+    String? deviceId,
   }) async {
     final ref = (paymentRef ?? '').trim();
-
-    // UI kazası önle: gerçek ödeme ref'leri burada kullanılmasın
-    // (backend zaten 403 döner, biz daha hızlı feedback veriyoruz)
     if (ref.isNotEmpty && !ref.startsWith("TEST-")) {
       throw Exception("markPaid legacy only. Real payments use /payments/verify.");
     }
 
     final uri = Uri.parse('$_base/coffee/$readingId/mark-paid');
 
-    final res = await http.post(
-      uri,
-      headers: ApiBase.headers(deviceId: deviceId),
-      body: jsonEncode({"payment_ref": paymentRef}),
-    );
+    final res = await http
+        .post(
+          uri,
+          headers: ApiBase.headers(deviceId: deviceId),
+          body: jsonEncode({"payment_ref": paymentRef}),
+        )
+        .timeout(_defaultTimeout);
 
     if (res.statusCode != 200) {
       throw Exception('coffee/mark-paid failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
@@ -133,14 +131,16 @@ class CoffeeApi {
 
   static Future<CoffeeReading> generate({
     required String readingId,
-    String? deviceId, // opsiyonel
+    String? deviceId,
   }) async {
     final uri = Uri.parse('$_base/coffee/$readingId/generate');
 
-    final res = await http.post(
-      uri,
-      headers: ApiBase.headers(deviceId: deviceId),
-    );
+    final res = await http
+        .post(
+          uri,
+          headers: ApiBase.headers(deviceId: deviceId),
+        )
+        .timeout(_generateTimeout);
 
     if (res.statusCode != 200) {
       throw Exception('coffee/generate failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
@@ -155,13 +155,11 @@ class CoffeeApi {
     String? deviceId,
   }) async {
     final CoffeeReading reading = await generate(readingId: readingId, deviceId: deviceId);
-
     final String text = (reading.comment ?? '').trim();
 
     if (text.isEmpty) {
-      throw Exception(
-        'generateText: comment is empty (backend should return comment or result_text)',
-      );
+      // daha net mesaj
+      throw Exception('generateText: yorum boş döndü (backend comment/result_text üretmedi)');
     }
 
     return text;
@@ -173,10 +171,12 @@ class CoffeeApi {
   }) async {
     final uri = Uri.parse('$_base/coffee/$readingId');
 
-    final res = await http.get(
-      uri,
-      headers: ApiBase.headers(deviceId: deviceId),
-    );
+    final res = await http
+        .get(
+          uri,
+          headers: ApiBase.headers(deviceId: deviceId),
+        )
+        .timeout(_defaultTimeout);
 
     if (res.statusCode != 200) {
       throw Exception('coffee/detail failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
@@ -192,11 +192,13 @@ class CoffeeApi {
   }) async {
     final uri = Uri.parse('$_base/coffee/$readingId/rate');
 
-    final res = await http.post(
-      uri,
-      headers: ApiBase.headers(deviceId: deviceId),
-      body: jsonEncode({"rating": rating}),
-    );
+    final res = await http
+        .post(
+          uri,
+          headers: ApiBase.headers(deviceId: deviceId),
+          body: jsonEncode({"rating": rating}),
+        )
+        .timeout(_defaultTimeout);
 
     if (res.statusCode != 200) {
       throw Exception('coffee/rate failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');

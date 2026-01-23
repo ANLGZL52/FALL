@@ -64,7 +64,7 @@ class SynastryRepo:
         if not row:
             return None
 
-        # ✅ idempotent: zaten paid ise tekrar çağrı zarar vermesin
+        # ✅ idempotent
         row.is_paid = True
         row.payment_ref = payment_ref
         row.status = "paid"
@@ -77,17 +77,17 @@ class SynastryRepo:
 
     def claim_processing(self, *, session: Session, reading_id: str) -> Tuple[Optional[Dict[str, Any]], bool]:
         """
-        ✅ Generate için kilit noktası:
-        - Eğer DONE ise: claimed=False, mevcut kaydı döndür.
-        - Eğer PROCESSING ise: claimed=False, mevcut kaydı döndür.
-        - Eğer PAID ise: status'u PROCESSING yapıp claimed=True döndür.
-        - Eğer ödeme yoksa: claimed=False, mevcut kaydı döndür (route 402 verir).
+        ✅ Generate için kilit:
+        - DONE ise: claimed=False
+        - PROCESSING ise: claimed=False
+        - PAID ise: status=PROCESSING + claimed=True
+        - ödeme yoksa: claimed=False (route 402 verir)
         """
         row = self._get_row(session=session, reading_id=reading_id)
         if not row:
             return None, False
 
-        # sonuç zaten varsa tekrar üretme
+        # sonuç varsa tekrar üretme
         if (row.result_text or "").strip():
             if row.status != "done":
                 row.status = "done"
@@ -99,11 +99,9 @@ class SynastryRepo:
 
         st = (row.status or "").lower().strip()
 
-        # processing durumunda tekrar tetikleme yok
         if st == "processing":
             return row.model_dump(), False
 
-        # paid -> processing only
         if row.is_paid and st in ("paid", "started", ""):
             row.status = "processing"
             row.updated_at = datetime.utcnow()
@@ -112,7 +110,6 @@ class SynastryRepo:
             session.refresh(row)
             return row.model_dump(), True
 
-        # ödeme yoksa route zaten 402 basacak
         return row.model_dump(), False
 
     def set_status(self, *, session: Session, reading_id: str, status: str) -> Optional[Dict[str, Any]]:

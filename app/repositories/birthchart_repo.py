@@ -66,7 +66,7 @@ def set_result_low(session: Session, reading_id: str, result_text: str) -> Birth
         raise ValueError("Reading not found")
 
     obj.result_text = result_text
-    obj.status = "completed"
+    obj.status = "done"  # ✅ completed yerine done
     return update_reading(session, obj)
 
 

@@ -1,4 +1,3 @@
-// mobile/lib/services/hand_api.dart
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
@@ -8,6 +7,10 @@ import 'api_base.dart';
 
 class HandApi {
   static String get _base => ApiBase.baseUrl;
+
+  static const Duration _defaultTimeout = Duration(seconds: 30);
+  static const Duration _uploadTimeout = Duration(seconds: 90);
+  static const Duration _generateTimeout = Duration(seconds: 150);
 
   static String _extractErrorMessage(String body) {
     try {
@@ -26,8 +29,8 @@ class HandApi {
     int? age,
     required String topic,
     required String question,
-    String? dominantHand, // right/left
-    String? photoHand, // right/left
+    String? dominantHand,
+    String? photoHand,
     String? relationshipStatus,
     String? bigDecision,
     String? deviceId,
@@ -44,11 +47,13 @@ class HandApi {
       "big_decision": bigDecision,
     };
 
-    final res = await http.post(
-      uri,
-      headers: ApiBase.headers(deviceId: deviceId),
-      body: jsonEncode(body),
-    );
+    final res = await http
+        .post(
+          uri,
+          headers: ApiBase.headers(deviceId: deviceId),
+          body: jsonEncode(body),
+        )
+        .timeout(_defaultTimeout);
 
     if (res.statusCode != 200) {
       throw Exception('hand/start failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
@@ -65,7 +70,6 @@ class HandApi {
     final uri = Uri.parse('$_base/hand/$readingId/upload-images');
     final req = http.MultipartRequest('POST', uri);
 
-    // multipart headers
     final headers = <String, String>{"Accept": "application/json"};
     final d = (deviceId ?? '').trim();
     if (d.isNotEmpty) headers["X-Device-Id"] = d;
@@ -75,7 +79,7 @@ class HandApi {
       req.files.add(await http.MultipartFile.fromPath('files', f.path));
     }
 
-    final streamed = await req.send();
+    final streamed = await req.send().timeout(_uploadTimeout);
     final res = await http.Response.fromStream(streamed);
 
     if (res.statusCode != 200) {
@@ -86,25 +90,25 @@ class HandApi {
   }
 
   /// ✅ LEGACY: mock akış için (TEST-...)
-  /// Real ödeme: /payments/verify server-side unlock yapıyor, burada çağırma.
   static Future<HandReading> markPaid({
     required String readingId,
     String? paymentRef,
     String? deviceId,
   }) async {
     final ref = (paymentRef ?? '').trim();
-
     if (ref.isNotEmpty && !ref.startsWith("TEST-")) {
       throw Exception("markPaid legacy only. Real payments use /payments/verify.");
     }
 
     final uri = Uri.parse('$_base/hand/$readingId/mark-paid');
 
-    final res = await http.post(
-      uri,
-      headers: ApiBase.headers(deviceId: deviceId),
-      body: jsonEncode({"payment_ref": paymentRef}),
-    );
+    final res = await http
+        .post(
+          uri,
+          headers: ApiBase.headers(deviceId: deviceId),
+          body: jsonEncode({"payment_ref": paymentRef}),
+        )
+        .timeout(_defaultTimeout);
 
     if (res.statusCode != 200) {
       throw Exception('hand/mark-paid failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
@@ -119,10 +123,12 @@ class HandApi {
   }) async {
     final uri = Uri.parse('$_base/hand/$readingId/generate');
 
-    final res = await http.post(
-      uri,
-      headers: ApiBase.headers(deviceId: deviceId),
-    );
+    final res = await http
+        .post(
+          uri,
+          headers: ApiBase.headers(deviceId: deviceId),
+        )
+        .timeout(_generateTimeout);
 
     if (res.statusCode != 200) {
       throw Exception('hand/generate failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
@@ -137,10 +143,12 @@ class HandApi {
   }) async {
     final uri = Uri.parse('$_base/hand/$readingId');
 
-    final res = await http.get(
-      uri,
-      headers: ApiBase.headers(deviceId: deviceId),
-    );
+    final res = await http
+        .get(
+          uri,
+          headers: ApiBase.headers(deviceId: deviceId),
+        )
+        .timeout(_defaultTimeout);
 
     if (res.statusCode != 200) {
       throw Exception('hand/detail failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
@@ -156,11 +164,13 @@ class HandApi {
   }) async {
     final uri = Uri.parse('$_base/hand/$readingId/rate');
 
-    final res = await http.post(
-      uri,
-      headers: ApiBase.headers(deviceId: deviceId),
-      body: jsonEncode({"rating": rating}),
-    );
+    final res = await http
+        .post(
+          uri,
+          headers: ApiBase.headers(deviceId: deviceId),
+          body: jsonEncode({"rating": rating}),
+        )
+        .timeout(_defaultTimeout);
 
     if (res.statusCode != 200) {
       throw Exception('hand/rate failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');

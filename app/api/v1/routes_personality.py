@@ -1,3 +1,4 @@
+# app/api/v1/routes_personality.py
 from __future__ import annotations
 
 from uuid import uuid4
@@ -99,20 +100,24 @@ def generate_personality(
     if not reading.get("is_paid"):
         raise HTTPException(status_code=402, detail="Payment Required")
 
+    status = (reading.get("status") or "").lower().strip()
+    result_text = (reading.get("result_text") or "").strip()
+
     # ✅ idempotent: sonuç varsa direkt dön
-    if (reading.get("status") in ("completed", "done")) and reading.get("result_text"):
+    if result_text and status == "done":
         return reading
 
-    # ✅ idempotent: processing ise tekrar üretme, mevcut state'i dön
-    if reading.get("status") == "processing":
+    # ✅ Eğer result var ama status yanlış kalmışsa düzeltip dön
+    if result_text and status != "done":
+        fixed = personality_repo.set_status(session=session, reading_id=reading_id, status="done")
+        return fixed or reading
+
+    # ✅ idempotent: processing ise tekrar üretme
+    if status == "processing":
         return reading
 
-    # burada status paid/started gibi bir şeyse production'a giriyoruz
-    personality_repo.set_status(
-        session=session,
-        reading_id=reading_id,
-        status="processing",
-    )
+    # ✅ production generate: processing'e çek
+    personality_repo.set_status(session=session, reading_id=reading_id, status="processing")
 
     try:
         result_text = generate_personality_reading(
@@ -134,15 +139,8 @@ def generate_personality(
 
     except Exception as e:
         # başarısızsa tekrar "paid" durumuna çek
-        personality_repo.set_status(
-            session=session,
-            reading_id=reading_id,
-            status="paid",
-        )
-        raise HTTPException(
-            status_code=500,
-            detail=f"Kişilik analizi üretilemedi: {e}",
-        )
+        personality_repo.set_status(session=session, reading_id=reading_id, status="paid")
+        raise HTTPException(status_code=500, detail=f"Kişilik analizi üretilemedi: {e}")
 
 
 @router.post("/{reading_id}/rate")
@@ -170,7 +168,7 @@ def download_personality_pdf(
     if not reading:
         raise HTTPException(status_code=404, detail="Reading not found")
 
-    if not reading.get("result_text"):
+    if not (reading.get("result_text") or "").strip():
         raise HTTPException(status_code=409, detail="Result not generated yet")
 
     pdf_bytes = build_personality_pdf_bytes(

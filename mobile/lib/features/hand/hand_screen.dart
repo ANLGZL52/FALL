@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../models/hand_reading.dart';
+import '../../services/device_id_service.dart';
 import '../../services/hand_api.dart';
 import '../../widgets/glass_card.dart';
 import '../../widgets/gradient_button.dart';
@@ -25,7 +26,7 @@ class _HandScreenState extends State<HandScreen> {
   final _ageController = TextEditingController();
 
   String? _dominantHand; // right/left
-  String? _photoHand;    // right/left
+  String? _photoHand; // right/left
 
   final ImagePicker _picker = ImagePicker();
   final List<File> _photos = [];
@@ -75,6 +76,9 @@ class _HandScreenState extends State<HandScreen> {
     setState(() => _loading = true);
 
     try {
+      // ✅ device id tek sefer al, tüm çağrılarda kullan
+      final deviceId = await DeviceIdService.getOrCreate();
+
       // 1) start
       final HandReading reading = await HandApi.start(
         name: _nameController.text.trim(),
@@ -83,10 +87,15 @@ class _HandScreenState extends State<HandScreen> {
         question: _questionController.text.trim(),
         dominantHand: _dominantHand,
         photoHand: _photoHand,
+        deviceId: deviceId,
       );
 
-      // 2) upload + backend validasyon (EL değilse burada patlayacak)
-      await HandApi.uploadImages(readingId: reading.id, files: _photos);
+      // 2) upload (backend validasyon burada patlayabilir)
+      await HandApi.uploadImages(
+        readingId: reading.id,
+        files: _photos,
+        deviceId: deviceId,
+      );
 
       if (!mounted) return;
 
@@ -165,7 +174,6 @@ class _HandScreenState extends State<HandScreen> {
         children: [
           const Text('El Bilgisi (yorum kalitesi için)', style: TextStyle(fontWeight: FontWeight.w700)),
           const SizedBox(height: 10),
-
           Row(
             children: [
               Expanded(
@@ -210,7 +218,6 @@ class _HandScreenState extends State<HandScreen> {
           children: [
             _photoArea(),
             const SizedBox(height: 12),
-
             Row(
               children: [
                 Expanded(
@@ -230,11 +237,9 @@ class _HandScreenState extends State<HandScreen> {
                 ),
               ],
             ),
-
             const SizedBox(height: 18),
             _handPickers(),
             const SizedBox(height: 18),
-
             GlassCard(
               child: Form(
                 key: _formKey,
@@ -268,9 +273,7 @@ class _HandScreenState extends State<HandScreen> {
                 ),
               ),
             ),
-
             const SizedBox(height: 18),
-
             GradientButton(
               text: _loading ? 'Yükleniyor...' : 'Fal Başlat (Ödeme Adımına Geç)',
               onPressed: _loading ? null : _submit,

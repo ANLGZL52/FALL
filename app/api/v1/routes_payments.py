@@ -143,7 +143,7 @@ def _unlock_reading_for_product(
     ✅ CRITICAL: unlock işlemi idempotent olmalı.
     Yani tekrar çağrılırsa zarar vermemeli.
     """
-
+    # Tarot: kart seçimi şart
     if product == "tarot":
         r = tarot_repo.get_reading(session, reading_id)
         if not r:
@@ -151,7 +151,6 @@ def _unlock_reading_for_product(
         if not r.get_cards():
             raise HTTPException(status_code=400, detail="Cards must be selected before verifying payment")
 
-        # idempotent unlock
         r.is_paid = True
         r.payment_ref = payment_ref
         r.status = "paid"
@@ -159,6 +158,7 @@ def _unlock_reading_for_product(
         tarot_repo.update_reading(session, r)
         return
 
+    # Hand: foto şart
     if product == "hand":
         r = hand_get_reading(session, reading_id)
         if not r:
@@ -174,6 +174,7 @@ def _unlock_reading_for_product(
         hand_update_reading(session, r)
         return
 
+    # Coffee: foto şart
     if product == "coffee":
         r = coffee_get_reading(session, reading_id)
         if not r:
@@ -189,6 +190,7 @@ def _unlock_reading_for_product(
         coffee_update_reading(session, r)
         return
 
+    # Numerology
     if product == "numerology":
         nrepo = NumerologyRepo()
         obj = nrepo.get(session=session, reading_id=reading_id)
@@ -198,6 +200,7 @@ def _unlock_reading_for_product(
             raise HTTPException(status_code=500, detail="Numerology mark_paid failed")
         return
 
+    # Birthchart
     if product == "birthchart":
         reading = birthchart_repo.get(session=session, reading_id=reading_id)
         if not reading:
@@ -206,6 +209,7 @@ def _unlock_reading_for_product(
             raise HTTPException(status_code=500, detail="Birthchart mark_paid failed")
         return
 
+    # Personality
     if product == "personality":
         reading = personality_repo.get(session=session, reading_id=reading_id)
         if not reading:
@@ -214,6 +218,7 @@ def _unlock_reading_for_product(
             raise HTTPException(status_code=500, detail="Personality mark_paid failed")
         return
 
+    # Synastry
     if product == "synastry":
         reading = synastry_repo.get(session=session, reading_id=reading_id)
         if not reading:
@@ -289,7 +294,7 @@ async def verify_payment(
         if not (req.receipt_data or "").strip():
             raise HTTPException(status_code=422, detail="receipt_data is required for app_store")
 
-    # ✅ İDempotent ama UNLOCK garantili olmalı
+    # ✅ verified ise idempotent davran
     if payment.status == "verified":
         if payment.transaction_id and payment.transaction_id != req.transaction_id:
             raise HTTPException(
@@ -297,7 +302,7 @@ async def verify_payment(
                 detail="payment already verified with different transaction_id",
             )
 
-        # 🔥 KRİTİK FIX: verified olsa bile reading unlock değilse tekrar dene
+        # 🔥 KRİTİK: verified olsa bile reading unlock değilse tekrar dene
         _unlock_reading_for_product(
             session=session,
             product=sku_info.product,
@@ -306,12 +311,6 @@ async def verify_payment(
         )
 
         return PaymentVerifyResponse(ok=True, verified=True, payment_id=payment.id, status="verified")
-
-    # ------------------------------------------------------------
-    # 0) (Opsiyonel ama önerilir) unlock precondition kontrolü
-    #    — burada bırakıyoruz ki verified olduktan sonra kilitlenmesin.
-    #    — yani hata olsa bile ileride kullanıcı tekrar verify çağırınca unlock yapılabilir.
-    # ------------------------------------------------------------
 
     # ------------------------------------------------------------
     # 1) Store doğrulama (stub veya gerçek)

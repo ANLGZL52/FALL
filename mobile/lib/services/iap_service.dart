@@ -19,6 +19,9 @@ class IapService {
   String? _activePaymentId;
   String? _activeSku;
 
+  // Purchased geldi ama verify/network anlık sapıttıysa retry etmek için
+  PurchaseDetails? _lastPurchasedForActiveFlow;
+
   static const Duration _defaultTimeout = Duration(minutes: 2);
 
   bool get _hasActiveFlow => _verifyCompleter != null;
@@ -27,11 +30,15 @@ class IapService {
     _sub ??= _iap.purchaseStream.listen(
       (purchases) async {
         for (final p in purchases) {
-          await _handlePurchaseUpdate(deviceId, p);
+          try {
+            await _handlePurchaseUpdate(deviceId, p);
+          } catch (_) {
+            // stream içinde patlamasın
+          }
         }
       },
       onError: (e) {
-        _fail("purchaseStream error: $e");
+        if (_hasActiveFlow) _fail("purchaseStream error: $e");
       },
     );
   }
@@ -63,6 +70,15 @@ class IapService {
 
     final deviceId = await DeviceIdService.getOrCreate();
 
+    // 0) Listener (önce bağla ki missed event olmasın)
+    _verifyCompleter = Completer<PaymentVerifyResult>();
+    await _ensureListener(deviceId);
+
+    // 0.1) ANDROID: eski purchase kuyruğu varsa temizlemek satın alma akışını stabil yapar
+    if (Platform.isAndroid) {
+      await _drainAndroidPendingPurchases();
+    }
+
     // 1) Intent
     final intent = await PurchaseApi.createIntent(
       deviceId: deviceId,
@@ -72,12 +88,9 @@ class IapService {
 
     _activePaymentId = intent.paymentId;
     _activeSku = sku;
+    _lastPurchasedForActiveFlow = null;
 
-    // 2) Stream
-    _verifyCompleter = Completer<PaymentVerifyResult>();
-    await _ensureListener(deviceId);
-
-    // 3) Buy (consumable)
+    // 2) Buy (consumable) -> autoConsume FALSE (kontrol bizde)
     final products = await loadProducts({sku});
     final pd = products[sku];
     if (pd == null) {
@@ -87,7 +100,7 @@ class IapService {
 
     final ok = await _iap.buyConsumable(
       purchaseParam: PurchaseParam(productDetails: pd),
-      autoConsume: true,
+      autoConsume: false,
     );
 
     if (!ok) {
@@ -95,33 +108,79 @@ class IapService {
       throw Exception("Satın alma başlatılamadı.");
     }
 
-    // 4) Wait with timeout
+    // 3) Wait with timeout
     return await _verifyCompleter!.future.timeout(
       timeout,
       onTimeout: () {
-        _fail("Ödeme zaman aşımına uğradı. (pending çok uzun sürdü)");
+        _fail("Ödeme zaman aşımına uğradı. (pending/verify çok uzun sürdü)");
         throw Exception("Ödeme zaman aşımı.");
       },
     );
   }
 
+  /// ✅ Stream’den gelen her purchase’ı yönet:
+  /// - Aktif flow SKU’su değilse bile: pendingCompletePurchase ise complete et (queue temizliği)
+  /// - Android consumable ise token varsa consume et (özellikle debug/testte şart)
   Future<void> _handlePurchaseUpdate(String deviceId, PurchaseDetails p) async {
-    if (_activeSku == null || _activePaymentId == null || _verifyCompleter == null) return;
-    if (p.productID != _activeSku) return;
+    final isActive = _activeSku != null && _activePaymentId != null && _verifyCompleter != null;
+    final isForActiveSku = isActive && (p.productID == _activeSku);
 
+    // PENDING: aktif akış SKU’su ise bekle, değilse dokunma
     if (p.status == PurchaseStatus.pending) return;
 
+    // Active değilse: sadece kuyruğu temizle (complete + consume)
+    if (!isActive || !isForActiveSku) {
+      await _finalizeIfNeeded(p);
+      return;
+    }
+
+    // CANCELLED/ERROR: flow biter
     if (p.status == PurchaseStatus.canceled) {
       _fail("Satın alma iptal edildi.");
       return;
     }
-
     if (p.status == PurchaseStatus.error) {
       _fail("Satın alma hatası: ${p.error}");
       return;
     }
 
+    // PURCHASED/RESTORED
     if (p.status == PurchaseStatus.purchased || p.status == PurchaseStatus.restored) {
+      _lastPurchasedForActiveFlow = p;
+
+      try {
+        final res = await _verifyWithRetries(deviceId, p);
+
+        if (!res.verified) {
+          _fail("Backend verify başarısız: ${res.status}");
+          return;
+        }
+
+        // ✅ verify OK -> önce acknowledge/complete
+        if (p.pendingCompletePurchase) {
+          await _iap.completePurchase(p);
+        }
+
+        // ✅ Android: sonra consume
+        if (Platform.isAndroid) {
+          await _consumeAndroidIfNeeded(p);
+        }
+
+        _success(res);
+      } catch (e) {
+        // verify exception -> cleanup + kullanıcı tekrar denesin
+        _fail("Verify exception: $e");
+      }
+    }
+  }
+
+  Future<PaymentVerifyResult> _verifyWithRetries(String deviceId, PurchaseDetails p) async {
+    const maxTry = 4;
+    const baseDelayMs = 650;
+
+    Object? lastErr;
+
+    for (var i = 1; i <= maxTry; i++) {
       try {
         final platform = Platform.isIOS ? "app_store" : "google_play";
 
@@ -129,31 +188,22 @@ class IapService {
         String? purchaseToken;
         String? receiptData;
 
-        // -------------------------
-        // ANDROID (Google Play)
-        // -------------------------
         if (platform == "google_play") {
-          // ✅ En güvenilir kaynak: GooglePlayPurchaseDetails -> billingClientPurchase
           if (p is GooglePlayPurchaseDetails) {
             final orderId = (p.billingClientPurchase.orderId ?? '').trim();
             final token = (p.billingClientPurchase.purchaseToken ?? '').trim();
             final purchaseTime = p.billingClientPurchase.purchaseTime ?? 0;
 
-            if (token.isNotEmpty) {
-              purchaseToken = token;
-            }
+            if (token.isNotEmpty) purchaseToken = token;
 
-            // ✅ transaction_id: orderId varsa direkt kullan
             if (orderId.isNotEmpty) {
               transactionId = orderId;
             } else if (token.isNotEmpty) {
-              // orderId boşsa token + time ile stabil bir id üret (random değil)
               final head = token.substring(0, token.length >= 16 ? 16 : token.length);
               transactionId = "GP-$head-$purchaseTime";
             }
           }
 
-          // Fallback: verificationData
           final localData = (p.verificationData.localVerificationData).trim();
           final serverData = (p.verificationData.serverVerificationData).trim();
 
@@ -164,41 +214,26 @@ class IapService {
 
           transactionId ??= (p.purchaseID ?? '').trim();
 
-          // son fallback: stabil üret (random yok)
           if ((transactionId ?? '').isEmpty) {
             final dt = (p.transactionDate ?? DateTime.now().millisecondsSinceEpoch.toString()).trim();
             transactionId = "TXN-${p.productID}-$dt";
           }
 
-          if ((purchaseToken ?? '').trim().length < 6) {
-            throw Exception("Android purchaseToken alınamadı.");
-          }
-          if ((transactionId ?? '').trim().length < 3) {
-            throw Exception("Android transactionId alınamadı.");
-          }
-        }
-
-        // -------------------------
-        // IOS (App Store)
-        // -------------------------
-        else {
+          if ((purchaseToken ?? '').trim().length < 6) throw Exception("Android purchaseToken alınamadı.");
+          if ((transactionId ?? '').trim().length < 3) throw Exception("Android transactionId alınamadı.");
+        } else {
           final serverData = (p.verificationData.serverVerificationData).trim();
           final localData = (p.verificationData.localVerificationData).trim();
 
           receiptData = (serverData.length >= 20) ? serverData : localData;
 
           transactionId = (p.purchaseID ?? '').trim();
-          if (transactionId.isEmpty) {
-            transactionId = "IOS-${DateTime.now().millisecondsSinceEpoch}";
-          }
+          if (transactionId.isEmpty) transactionId = "IOS-${DateTime.now().millisecondsSinceEpoch}";
 
-          if ((receiptData ?? '').trim().length < 20) {
-            throw Exception("iOS receiptData alınamadı.");
-          }
+          if ((receiptData ?? '').trim().length < 20) throw Exception("iOS receiptData alınamadı.");
         }
 
-        // ✅ Backend verify
-        final res = await PurchaseApi.verify(
+        return await PurchaseApi.verify(
           deviceId: deviceId,
           paymentId: _activePaymentId!,
           sku: _activeSku!,
@@ -207,22 +242,55 @@ class IapService {
           purchaseToken: purchaseToken,
           receiptData: receiptData,
         );
-
-        if (!res.verified) {
-          _fail("Backend verify başarısız: ${res.status}");
-          return;
-        }
-
-        // ✅ completePurchase
-        if (p.pendingCompletePurchase) {
-          await _iap.completePurchase(p);
-        }
-
-        _success(res);
       } catch (e) {
-        _fail("Verify exception: $e");
+        lastErr = e;
+        if (i < maxTry) {
+          await Future.delayed(Duration(milliseconds: baseDelayMs * i));
+          continue;
+        }
       }
     }
+
+    throw Exception(lastErr ?? "Verify failed");
+  }
+
+  Future<void> _finalizeIfNeeded(PurchaseDetails p) async {
+    // Active flow değilken gelen purchase’ları temizle
+    try {
+      if (p.pendingCompletePurchase) {
+        await _iap.completePurchase(p);
+      }
+    } catch (_) {}
+
+    if (Platform.isAndroid) {
+      await _consumeAndroidIfNeeded(p);
+    }
+  }
+
+  Future<void> _consumeAndroidIfNeeded(PurchaseDetails p) async {
+    try {
+      if (p is GooglePlayPurchaseDetails) {
+        final token = (p.billingClientPurchase.purchaseToken ?? '').trim();
+        if (token.isEmpty) return;
+
+        final addition = _iap.getPlatformAddition<InAppPurchaseAndroidPlatformAddition>();
+        await addition.consumePurchase(p);
+      }
+    } catch (_) {
+      // consume başarısız olsa bile genelde akış yürür.
+      // tekrar deliver ederse backend duplicate korur.
+    }
+  }
+
+  /// ✅ Android’de satın alma öncesi “kuyruk temizliği”
+  /// Çok sık karşılaşılan: testte/önceki denemede kalan purchase yüzünden aynı sku tekrar tekrar deliver olur.
+  Future<void> _drainAndroidPendingPurchases() async {
+    try {
+      // in_app_purchase paketinde doğrudan “query purchases” yok.
+      // Bu yüzden pratik çözüm: stream üzerinden gelenleri finalize ediyoruz (yukarıdaki finalize).
+      // Burada ekstra bir şey yapmıyoruz; sadece future-proof bir hook.
+      return;
+    } catch (_) {}
   }
 
   String? _extractAndroidPurchaseToken(String raw) {
@@ -254,6 +322,7 @@ class IapService {
     _verifyCompleter = null;
     _activePaymentId = null;
     _activeSku = null;
+    _lastPurchasedForActiveFlow = null;
   }
 
   Future<void> dispose() async {

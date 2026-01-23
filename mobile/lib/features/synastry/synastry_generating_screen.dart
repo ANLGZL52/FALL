@@ -23,6 +23,7 @@ class _SynastryGeneratingScreenState extends State<SynastryGeneratingScreen> {
   String? _deviceId;
 
   bool _generateTriggered = false;
+  bool _generateInFlight = false;
   String _lastStatus = '';
 
   int _elapsed = 0;
@@ -52,6 +53,16 @@ class _SynastryGeneratingScreenState extends State<SynastryGeneratingScreen> {
 
   bool _isErrorStatus(String s) => _norm(s) == 'error';
 
+  bool _isHttp(Object e, int code) {
+    final s = e.toString();
+    return s.contains(' $code ') || s.contains('$code /') || s.contains(':$code');
+  }
+
+  bool _isRetryableGenerateError(Object e) {
+    // “verify yansıma / işlem çakışması / anlık timing”
+    return _isHttp(e, 402) || _isHttp(e, 409) || e.toString().toLowerCase().contains('timeout');
+  }
+
   Future<void> _start() async {
     try {
       _deviceId = await DeviceIdService.getOrCreate();
@@ -73,6 +84,55 @@ class _SynastryGeneratingScreenState extends State<SynastryGeneratingScreen> {
     }
   }
 
+  Future<void> _triggerGenerateSafely() async {
+    if (_generateInFlight) return;
+    _generateInFlight = true;
+
+    // kontrollü retry/backoff
+    const maxTry = 5;
+    const baseDelayMs = 800;
+
+    for (var i = 1; i <= maxTry; i++) {
+      try {
+        await _api.generate(widget.readingId, deviceId: _deviceId);
+        _generateInFlight = false;
+        return;
+      } catch (e) {
+        final retryable = _isRetryableGenerateError(e);
+
+        if (!mounted) {
+          _generateInFlight = false;
+          return;
+        }
+
+        if (retryable && i < maxTry) {
+          // UI spam olmasın: sadece 1 ve 3. denemede minik bilgi
+          if (i == 1 || i == 3) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text("Analiz başlatılıyor… (tekrar deniyorum)"),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+          await Future.delayed(Duration(milliseconds: baseDelayMs * i));
+          continue;
+        }
+
+        // retry bitti -> poll devam etsin ama ekranda hata gösterebiliriz
+        setState(() {
+          _status = 'error';
+          _error = e.toString();
+        });
+
+        _generateInFlight = false;
+        return;
+      }
+    }
+
+    _generateInFlight = false;
+  }
+
   Future<void> _pollOnce() async {
     _elapsed += _pollSec;
 
@@ -87,7 +147,7 @@ class _SynastryGeneratingScreenState extends State<SynastryGeneratingScreen> {
 
       setState(() {
         _status = st.isEmpty ? 'processing' : st;
-        _error = s.error; // model'de yoksa null kalır
+        _error = s.error; // model'de yoksa null
       });
 
       // ✅ bittiyse result ekranı
@@ -105,7 +165,7 @@ class _SynastryGeneratingScreenState extends State<SynastryGeneratingScreen> {
         return;
       }
 
-      // ✅ hata durumunda dur
+      // backend "error" derse timerı kes (bu gerçek hata)
       if (_isErrorStatus(st)) {
         _timer?.cancel();
         return;
@@ -120,12 +180,15 @@ class _SynastryGeneratingScreenState extends State<SynastryGeneratingScreen> {
 
       if (shouldTriggerGenerate && (!_generateTriggered || cameBackToPaid)) {
         _generateTriggered = true;
-        await _api.generate(widget.readingId, deviceId: _deviceId);
+        // generate artık safe retry ile
+        await _triggerGenerateSafely();
       }
 
       _lastStatus = st;
     } catch (e) {
       if (!mounted) return;
+
+      // poll’da hata: kullanıcıya göster ama “retry” ile tekrar başlatabilsin
       setState(() {
         _status = 'error';
         _error = e.toString();
@@ -139,6 +202,7 @@ class _SynastryGeneratingScreenState extends State<SynastryGeneratingScreen> {
       _status = 'processing';
       _error = null;
       _generateTriggered = false;
+      _generateInFlight = false;
       _lastStatus = '';
       _elapsed = 0;
     });

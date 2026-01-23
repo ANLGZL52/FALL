@@ -45,9 +45,26 @@ def mark_paid_low(session: Session, reading_id: str, payment_ref: Optional[str])
     if not obj:
         raise ValueError("Reading not found")
 
+    # ✅ idempotent
     obj.is_paid = True
     obj.payment_ref = payment_ref
     obj.status = "paid"
+    return update_reading(session, obj)
+
+
+def set_status_low(session: Session, reading_id: str, status: str) -> NumerologyReadingDB:
+    """
+    ✅ started/paid/processing/done standardı
+    """
+    st = (status or "").lower().strip()
+    if st not in ("started", "paid", "processing", "done"):
+        raise ValueError(f"Invalid status: {status}")
+
+    obj = get_reading(session, reading_id)
+    if not obj:
+        raise ValueError("Reading not found")
+
+    obj.status = st
     return update_reading(session, obj)
 
 
@@ -56,7 +73,7 @@ def set_result_low(session: Session, reading_id: str, result_text: str) -> Numer
     if not obj:
         raise ValueError("Reading not found")
 
-    obj.status = "completed"
+    obj.status = "done"  # ✅ completed yerine done
     obj.result_text = result_text
     return update_reading(session, obj)
 
@@ -93,6 +110,13 @@ class NumerologyRepo:
     def mark_paid(self, *, session: Session, reading_id: str, payment_ref: Optional[str]) -> Optional[dict]:
         try:
             obj = mark_paid_low(session, reading_id, payment_ref)
+            return _dump(obj)
+        except ValueError:
+            return None
+
+    def set_status(self, *, session: Session, reading_id: str, status: str) -> Optional[dict]:
+        try:
+            obj = set_status_low(session, reading_id, status)
             return _dump(obj)
         except ValueError:
             return None

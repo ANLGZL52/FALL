@@ -16,7 +16,10 @@ router = APIRouter(prefix="/birthchart", tags=["birthchart"])
 
 
 @router.post("/start")
-def start_birthchart(payload: BirthChartStartRequest, session: Session = Depends(get_session)):
+def start_birthchart(
+    payload: BirthChartStartRequest,
+    session: Session = Depends(get_session),
+):
     reading_id = str(uuid4())
     reading = birthchart_repo.create(
         session=session,
@@ -33,7 +36,11 @@ def start_birthchart(payload: BirthChartStartRequest, session: Session = Depends
 
 
 @router.post("/{reading_id}/mark-paid")
-def mark_paid(reading_id: str, payload: Dict[str, Any] | None = None, session: Session = Depends(get_session)):
+def mark_paid(
+    reading_id: str,
+    payload: Dict[str, Any] | None = None,
+    session: Session = Depends(get_session),
+):
     """
     ✅ Legacy/mock akış bozulmasın diye endpoint duruyor.
     🔒 Ama güvenlik için sadece TEST-... (mock) ödeme ref ile çalışır.
@@ -54,8 +61,13 @@ def mark_paid(reading_id: str, payload: Dict[str, Any] | None = None, session: S
     if not reading:
         raise HTTPException(status_code=404, detail="Reading not found")
     return reading
+
+
 @router.get("/{reading_id}")
-def detail(reading_id: str, session: Session = Depends(get_session)):
+def detail(
+    reading_id: str,
+    session: Session = Depends(get_session),
+):
     reading = birthchart_repo.get(session=session, reading_id=reading_id)
     if not reading:
         raise HTTPException(status_code=404, detail="Reading not found")
@@ -63,14 +75,35 @@ def detail(reading_id: str, session: Session = Depends(get_session)):
 
 
 @router.post("/{reading_id}/generate")
-def generate(reading_id: str, session: Session = Depends(get_session)):
+def generate(
+    reading_id: str,
+    session: Session = Depends(get_session),
+):
     reading = birthchart_repo.get(session=session, reading_id=reading_id)
     if not reading:
         raise HTTPException(status_code=404, detail="Reading not found")
 
+    # 🔒 ödeme zorunlu
     if not reading.get("is_paid"):
         raise HTTPException(status_code=402, detail="Payment Required")
 
+    status = (reading.get("status") or "").lower().strip()
+    result_text = (reading.get("result_text") or "").strip()
+
+    # ✅ idempotent: sonuç varsa direkt dön
+    if result_text and status == "done":
+        return reading
+
+    # ✅ result var ama status farklıysa düzelt
+    if result_text and status != "done":
+        fixed = birthchart_repo.set_status(session=session, reading_id=reading_id, status="done")
+        return fixed or reading
+
+    # ✅ processing ise tekrar üretme
+    if status == "processing":
+        return reading
+
+    # ✅ production generate
     birthchart_repo.set_status(session=session, reading_id=reading_id, status="processing")
 
     try:
@@ -85,6 +118,7 @@ def generate(reading_id: str, session: Session = Depends(get_session)):
         )
         updated = birthchart_repo.set_result(session=session, reading_id=reading_id, result_text=result_text)
         return updated
+
     except Exception as e:
         birthchart_repo.set_status(session=session, reading_id=reading_id, status="paid")
         raise HTTPException(status_code=500, detail=f"Doğum haritası yorum üretilemedi: {e}")

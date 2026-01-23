@@ -1,10 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import '../../services/coffee_api.dart';
 import '../../services/device_id_service.dart';
 import '../../services/iap_service.dart';
 import '../../services/product_catalog.dart';
+
+import 'coffee_loading_screen.dart';
 
 import '../../widgets/glass_card.dart';
 import '../../widgets/gradient_button.dart';
@@ -20,14 +21,22 @@ class CoffeePaymentScreen extends StatefulWidget {
 
 class _CoffeePaymentScreenState extends State<CoffeePaymentScreen> {
   bool _loading = false;
+  String? _lastPaymentId;
 
   // ✅ Debug modda da store akışını test etmek istersen true
   static const bool debugUseStoreIap = false;
 
+  Future<void> _goLoading() async {
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => CoffeeLoadingScreen(readingId: widget.readingId)),
+    );
+  }
+
   Future<void> _pay() async {
     setState(() => _loading = true);
     try {
-      final deviceId = await DeviceIdService.getOrCreate();
+      await DeviceIdService.getOrCreate();
 
       final shouldUseIap = kReleaseMode || debugUseStoreIap;
       if (shouldUseIap) {
@@ -38,12 +47,13 @@ class _CoffeePaymentScreenState extends State<CoffeePaymentScreen> {
         if (!verify.verified) {
           throw Exception("Ödeme doğrulanamadı: ${verify.status}");
         }
+
+        if (mounted) setState(() => _lastPaymentId = verify.paymentId);
       }
 
-      await CoffeeApi.generate(readingId: widget.readingId, deviceId: deviceId);
-
-      if (!mounted) return;
-      Navigator.of(context).pop(true);
+      // ✅ ödeme sonrası generate burada YOK.
+      // Generate işlemini Loading ekranı retry/backoff ile yapacak.
+      await _goLoading();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -70,7 +80,6 @@ class _CoffeePaymentScreenState extends State<CoffeePaymentScreen> {
                   const SizedBox(height: 10),
                   const Text('Falını başlatmak için ödeme adımını tamamla.'),
                   const SizedBox(height: 12),
-
                   const Text('Tutar: 49 ₺', style: TextStyle(fontWeight: FontWeight.w800)),
                   const SizedBox(height: 4),
                   Text(
@@ -82,6 +91,18 @@ class _CoffeePaymentScreenState extends State<CoffeePaymentScreen> {
                     'Vergiler Google Play tarafından ödeme sırasında eklenir.',
                     style: TextStyle(color: Colors.white.withOpacity(0.70), fontSize: 11, height: 1.2),
                   ),
+                  const SizedBox(height: 10),
+                  Text(
+                    'SKU: ${ProductCatalog.coffee49}',
+                    style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 12),
+                  ),
+                  if (_lastPaymentId != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      'Son işlem: $_lastPaymentId',
+                      style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 12),
+                    ),
+                  ],
                 ],
               ),
             ),

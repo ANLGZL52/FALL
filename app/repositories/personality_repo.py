@@ -1,3 +1,4 @@
+# app/repositories/personality_repo.py
 from __future__ import annotations
 
 from datetime import datetime
@@ -97,7 +98,7 @@ class PersonalityRepo:
         if not obj:
             return None
         obj.result_text = result_text
-        obj.status = "completed"
+        obj.status = "done"  # ✅ completed yerine done
         return _dump(_commit(session, obj))
 
     def set_rating(self, *, session: Session, reading_id: str, rating: int) -> Optional[dict]:

@@ -1,21 +1,21 @@
 import 'package:flutter/material.dart';
 
-import '../../services/coffee_api.dart';
 import '../../services/device_id_service.dart';
+import '../../services/hand_api.dart';
 import '../../widgets/glass_card.dart';
 import '../../widgets/mystic_scaffold.dart';
-import 'coffee_result_screen.dart';
 import '../home/home_screen.dart';
+import 'hand_result_screen.dart';
 
-class CoffeeLoadingScreen extends StatefulWidget {
+class HandLoadingScreen extends StatefulWidget {
   final String readingId;
-  const CoffeeLoadingScreen({super.key, required this.readingId});
+  const HandLoadingScreen({super.key, required this.readingId});
 
   @override
-  State<CoffeeLoadingScreen> createState() => _CoffeeLoadingScreenState();
+  State<HandLoadingScreen> createState() => _HandLoadingScreenState();
 }
 
-class _CoffeeLoadingScreenState extends State<CoffeeLoadingScreen> {
+class _HandLoadingScreenState extends State<HandLoadingScreen> {
   @override
   void initState() {
     super.initState();
@@ -27,24 +27,50 @@ class _CoffeeLoadingScreenState extends State<CoffeeLoadingScreen> {
     return s.contains(' $code ') || s.contains('$code /') || s.contains(':$code');
   }
 
+  String _pickText(dynamic reading) {
+    try {
+      // HandReading içinde olabilecek alanlar:
+      // - resultText
+      // - result_text
+      // - comment
+      final m = reading as dynamic;
+
+      final a = (m.resultText ?? '').toString().trim();
+      if (a.isNotEmpty) return a;
+
+      final b = (m.result_text ?? '').toString().trim();
+      if (b.isNotEmpty) return b;
+
+      final c = (m.comment ?? '').toString().trim();
+      if (c.isNotEmpty) return c;
+    } catch (_) {}
+
+    return '';
+  }
+
   Future<void> _run() async {
     try {
       final deviceId = await DeviceIdService.getOrCreate();
 
-      // ✅ generate için retry/backoff (verify sonrası DB işareti gecikebilir)
       const maxTry = 6;
       const baseDelayMs = 900;
 
       String text = '';
+
       for (var i = 1; i <= maxTry; i++) {
         try {
-          text = await CoffeeApi.generateText(
+          final reading = await HandApi.generate(
             readingId: widget.readingId,
             deviceId: deviceId,
           );
+
+          text = _pickText(reading);
+          if (text.isEmpty) {
+            throw Exception('generate: yorum boş döndü');
+          }
           break;
         } catch (e) {
-          final retryable = _isHttp(e, 400) || _isHttp(e, 402) || _isHttp(e, 409);
+          final retryable = _isHttp(e, 402) || _isHttp(e, 409);
           if (retryable && i < maxTry) {
             await Future.delayed(Duration(milliseconds: baseDelayMs * i));
             continue;
@@ -56,7 +82,7 @@ class _CoffeeLoadingScreenState extends State<CoffeeLoadingScreen> {
       if (!mounted) return;
 
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => CoffeeResultScreen(resultText: text)),
+        MaterialPageRoute(builder: (_) => HandResultScreen(resultText: text)),
         (route) => false,
       );
     } catch (e) {
@@ -87,7 +113,7 @@ class _CoffeeLoadingScreenState extends State<CoffeeLoadingScreen> {
                   CircularProgressIndicator(),
                   SizedBox(height: 16),
                   Text(
-                    'Fincandaki işaretler çözülüyor...\nFalın hazırlanıyor.',
+                    'Çizgiler okunuyor...\nEl falın hazırlanıyor.',
                     textAlign: TextAlign.center,
                   ),
                 ],
