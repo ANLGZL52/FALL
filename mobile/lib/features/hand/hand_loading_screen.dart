@@ -27,6 +27,10 @@ class _HandLoadingScreenState extends State<HandLoadingScreen> {
     return s.contains(' $code ') || s.contains('$code /') || s.contains(':$code');
   }
 
+  bool _hasHint(Object e, String hint) {
+    return e.toString().toLowerCase().contains(hint.toLowerCase());
+  }
+
   Future<void> _run() async {
     try {
       final deviceId = await DeviceIdService.getOrCreate();
@@ -37,31 +41,49 @@ class _HandLoadingScreenState extends State<HandLoadingScreen> {
 
       for (var i = 1; i <= maxTry; i++) {
         try {
-          // ✅ Sende HandApi.generate var (generateText yok)
           await HandApi.generate(readingId: widget.readingId, deviceId: deviceId);
           break;
         } catch (e) {
-          final retryable = _isHttp(e, 400) || _isHttp(e, 402) || _isHttp(e, 409);
+          // ✅ 400: yanlış foto / validasyon -> retry YOK
+          if (_isHttp(e, 400)) {
+            final msg = e.toString().contains('detail')
+                ? e.toString()
+                : "Lütfen sadece avuç içi/el fotoğrafı yükleyin.";
+            throw Exception(msg);
+          }
+
+          // ✅ 402: ödeme henüz DB'ye yansımadı olabilir (verify gecikmesi) -> retry var
+          // ✅ 409: idempotent/lock -> retry var
+          final retryable = _isHttp(e, 402) || _isHttp(e, 409) || _isHttp(e, 429) || _isHttp(e, 500);
+
           if (retryable && i < maxTry) {
             await Future.delayed(Duration(milliseconds: baseDelayMs * i));
             continue;
           }
+
           rethrow;
         }
       }
 
       if (!mounted) return;
 
-      // ✅ Result screen readingId ile açılıyor
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => HandResultScreen(readingId: widget.readingId)),
         (route) => false,
       );
     } catch (e) {
       if (!mounted) return;
+
+      // ✅ Kullanıcı dostu mesaj
+      String msg = e.toString();
+      if (msg.contains("Lütfen sadece avuç içi/el fotoğrafı yükleyin")) {
+        msg = "Lütfen sadece avuç içi/el fotoğrafı yükleyin.";
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Yorum üretilemedi: $e')),
+        SnackBar(content: Text(msg.replaceFirst('Exception: ', ''))),
       );
+
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => HomeScreen()),
         (route) => false,
