@@ -73,6 +73,23 @@ def _delete_paths(paths: List[str]) -> None:
             pass
 
 
+def _hand_upload_user_message(verdict: dict) -> str:
+    """
+    ✅ Kullanıcıya net/insancıl mesaj üretir.
+    LLM'in 'reason' alanını direkt basmak bazen garip olabiliyor;
+    bu yüzden güvenli bir üst mesaj + kısa neden.
+    """
+    reason = (verdict.get("reason") or "").strip()
+    base = (
+        "Bu görseller el falı için uygun görünmüyor. "
+        "Lütfen sadece AVUÇ İÇİ (palm) fotoğrafı yükleyin.\n\n"
+        "İpucu: Avuç içi tamamen kadrajda olsun, ışık iyi olsun, çizgiler net görünsün."
+    )
+    if reason and len(reason) <= 120:
+        return f"{base}\n\nNeden: {reason}"
+    return base
+
+
 # ------------------------------------------------
 # START
 # ------------------------------------------------
@@ -116,7 +133,7 @@ async def upload_images(
     if len(files) < 1 or len(files) > 3:
         raise HTTPException(
             status_code=400,
-            detail="Lütfen 1 ile 3 arasında el fotoğrafı yükleyin."
+            detail="Lütfen 1 ile 3 arasında el fotoğrafı yükleyin.",
         )
 
     saved = await save_uploads(reading_id, files)
@@ -127,10 +144,7 @@ async def upload_images(
         _delete_paths(saved)
         raise HTTPException(
             status_code=400,
-            detail=(
-                "Lütfen sadece el fotoğrafı yükleyin. "
-                "Eliniz net, kadrajda ve açık şekilde görünmelidir."
-            )
+            detail=_hand_upload_user_message(verdict),
         )
 
     r = set_photos(session, reading_id, saved)
@@ -147,7 +161,7 @@ async def mark_paid(reading_id: str, body: MarkPaidRequest, session: Session = D
     if not list_photos(r):
         raise HTTPException(
             status_code=400,
-            detail="Ödeme yapmadan önce el fotoğrafı yüklemelisiniz."
+            detail="Ödeme yapmadan önce el fotoğrafı yüklemelisiniz.",
         )
 
     if not body.payment_ref:
@@ -156,7 +170,7 @@ async def mark_paid(reading_id: str, body: MarkPaidRequest, session: Session = D
     if not body.payment_ref.startswith("TEST-"):
         raise HTTPException(
             status_code=403,
-            detail="Gerçek ödemeler için /payments/verify kullanılır."
+            detail="Gerçek ödemeler için /payments/verify kullanılır.",
         )
 
     if r.is_paid:
@@ -182,6 +196,7 @@ async def generate(reading_id: str, session: Session = Depends(get_session)):
     if not photos:
         raise HTTPException(status_code=400, detail="El fotoğrafı yüklenmedi.")
 
+    # ✅ ödeme yoksa 402
     if not r.is_paid:
         raise HTTPException(status_code=402, detail="Ödeme yapılmadan yorum oluşturulamaz.")
 
@@ -194,7 +209,7 @@ async def generate(reading_id: str, session: Session = Depends(get_session)):
     if not verdict.get("ok", False):
         raise HTTPException(
             status_code=400,
-            detail="Yüklenen görseller el fotoğrafı değil. Lütfen elinizi net şekilde çekin."
+            detail=_hand_upload_user_message(verdict),
         )
 
     r = set_status(session, reading_id, "processing")

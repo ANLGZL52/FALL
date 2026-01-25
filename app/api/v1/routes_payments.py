@@ -132,6 +132,44 @@ class PaymentVerifyResponse(BaseModel):
     status: str
 
 
+def _check_prerequisites(*, session: Session, product: str, reading_id: str) -> None:
+    """
+    ✅ En kritik fix:
+    Store doğrulamasına geçmeden ÖNCE ürünün gerektirdiği adımlar tamam mı kontrol eder.
+    Yanlış sırada gelinirse 409 dönerek kullanıcıyı doğru adıma yönlendirir.
+    Böylece “para çekildi ama akış ilerlemedi” vakaları biter.
+    """
+    # TAROT -> kart seçimi şart
+    if product == "tarot":
+        r = tarot_repo.get_reading(session, reading_id)
+        if not r:
+            raise HTTPException(status_code=404, detail="Tarot reading not found for this payment")
+        if not r.get_cards():
+            raise HTTPException(status_code=409, detail="Cards must be selected before payment")
+        return
+
+    # HAND -> foto şart
+    if product == "hand":
+        r = hand_get_reading(session, reading_id)
+        if not r:
+            raise HTTPException(status_code=404, detail="Hand reading not found for this payment")
+        if not hand_list_photos(r):
+            raise HTTPException(status_code=409, detail="Upload hand photos before payment")
+        return
+
+    # COFFEE -> foto şart
+    if product == "coffee":
+        r = coffee_get_reading(session, reading_id)
+        if not r:
+            raise HTTPException(status_code=404, detail="Coffee reading not found for this payment")
+        if not coffee_list_photos(r):
+            raise HTTPException(status_code=409, detail="Upload coffee photos before payment")
+        return
+
+    # NUMEROLOGY / BIRTHCHART / PERSONALITY / SYNASTRY -> precondition yok
+    return
+
+
 def _unlock_reading_for_product(
     *,
     session: Session,
@@ -312,7 +350,11 @@ async def verify_payment(
         if not (req.receipt_data or "").strip():
             raise HTTPException(status_code=422, detail="receipt_data is required for app_store")
 
-    # ✅ verified ise idempotent davran
+    # ✅ PRECONDITION CHECK (store verify’den ÖNCE)
+    # Yanlış sırada gelirse 409 döner; kullanıcı kart/foto adımını tamamlar.
+    _check_prerequisites(session=session, product=sku_info.product, reading_id=payment.reading_id)
+
+    # ✅ verified ise idempotent davran (ve unlock hata verse bile verify'yi fail etme)
     if payment.status == "verified":
         if payment.transaction_id and payment.transaction_id != req.transaction_id:
             raise HTTPException(
@@ -321,12 +363,16 @@ async def verify_payment(
             )
 
         # 🔥 KRİTİK: verified olsa bile reading unlock değilse tekrar dene
-        _unlock_reading_for_product(
-            session=session,
-            product=sku_info.product,
-            reading_id=payment.reading_id,
-            payment_ref=payment.id,
-        )
+        # Ama burada hata alırsak verify akışını bozmayacağız.
+        try:
+            _unlock_reading_for_product(
+                session=session,
+                product=sku_info.product,
+                reading_id=payment.reading_id,
+                payment_ref=payment.id,
+            )
+        except HTTPException:
+            pass
 
         return PaymentVerifyResponse(ok=True, verified=True, payment_id=payment.id, status="verified")
 

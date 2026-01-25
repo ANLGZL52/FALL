@@ -74,7 +74,7 @@ class PaymentVerifyResult {
 
   factory PaymentVerifyResult.fromJson(Map<String, dynamic> j) {
     final okVal = j.containsKey('ok') ? j['ok'] : true;
-    final ok = okVal is bool ? okVal : (okVal.toString().toLowerCase() == 'true');
+    final ok = okVal is bool ? okVal : (okVal.toString().totoLowerCase() == 'true');
 
     final verVal = j.containsKey('verified') ? j['verified'] : false;
     final verified = verVal is bool ? verVal : (verVal.toString().toLowerCase() == 'true');
@@ -91,6 +91,13 @@ class PaymentVerifyResult {
 class PurchaseApi {
   static Uri _u(String path) => Uri.parse('${ApiBase.baseUrl}$path');
 
+  // ✅ Intent genelde hızlı
+  static const Duration _intentTimeout = Duration(seconds: 30);
+
+  // ✅ Verify bazen uzayabiliyor (network / backend / store)
+  // IapService zaten kendi içinde retry yapıyor. Burada timeout'u uzun tutmak daha güvenli.
+  static const Duration _verifyTimeout = Duration(seconds: 90);
+
   static Future<PaymentIntentResult> createIntent({
     required String deviceId,
     required String readingId,
@@ -102,14 +109,25 @@ class PurchaseApi {
     };
 
     final res = await http
-        .post(_u('/payments/intent'), headers: ApiBase.headers(deviceId: deviceId), body: jsonEncode(body))
-        .timeout(const Duration(seconds: 30));
+        .post(
+          _u('/payments/intent'),
+          headers: ApiBase.headers(deviceId: deviceId),
+          body: jsonEncode(body),
+        )
+        .timeout(_intentTimeout);
 
     if (res.statusCode >= 400) {
       throw Exception('payments/intent failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
     }
 
-    return PaymentIntentResult.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+    final out = PaymentIntentResult.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+
+    // ekstra güvenlik
+    if (!out.ok || out.paymentId.trim().isEmpty) {
+      throw Exception('payments/intent invalid response: ${res.body}');
+    }
+
+    return out;
   }
 
   static Future<PaymentVerifyResult> verify({
@@ -141,13 +159,24 @@ class PurchaseApi {
     }
 
     final res = await http
-        .post(_u('/payments/verify'), headers: ApiBase.headers(deviceId: deviceId), body: jsonEncode(body))
-        .timeout(const Duration(seconds: 30));
+        .post(
+          _u('/payments/verify'),
+          headers: ApiBase.headers(deviceId: deviceId),
+          body: jsonEncode(body),
+        )
+        .timeout(_verifyTimeout);
 
     if (res.statusCode >= 400) {
       throw Exception('payments/verify failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
     }
 
-    return PaymentVerifyResult.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+    final out = PaymentVerifyResult.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+
+    // ✅ verify false ise bunu net hata yapalım (üst katman doğru mesaj göstersin)
+    if (!out.ok || !out.verified) {
+      throw Exception('IAP doğrulama başarısız: status=${out.status}');
+    }
+
+    return out;
   }
 }

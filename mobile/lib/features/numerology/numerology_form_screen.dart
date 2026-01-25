@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 
-import 'package:lunaura/widgets/mystic_scaffold.dart';
-import 'package:lunaura/services/numerology_api.dart';
-import 'package:lunaura/features/numerology/numerology_loading_screen.dart';
+import '../../services/device_id_service.dart';
+import '../../services/numerology_api.dart';
+import '../../models/numerology_reading.dart';
+import '../../widgets/mystic_scaffold.dart';
+
+import 'numerology_payment_screen.dart';
 
 class NumerologyFormScreen extends StatefulWidget {
   const NumerologyFormScreen({super.key});
@@ -13,20 +16,33 @@ class NumerologyFormScreen extends StatefulWidget {
 
 class _NumerologyFormScreenState extends State<NumerologyFormScreen> {
   final _nameCtrl = TextEditingController();
+  final _birthDateCtrl = TextEditingController(); // YYYY-MM-DD
+  final _topicCtrl = TextEditingController(text: "genel");
   final _questionCtrl = TextEditingController();
-  DateTime? _birth;
+
   bool _loading = false;
 
-  String _fmt(DateTime d) {
-    final y = d.year.toString().padLeft(4, "0");
-    final m = d.month.toString().padLeft(2, "0");
-    final day = d.day.toString().padLeft(2, "0");
-    return "$y-$m-$day";
+  void _toast(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.fromLTRB(18, 0, 18, 90),
+      ),
+    );
   }
 
-  Future<void> _pickDate() async {
+  Future<void> _pickBirthDate() async {
     final now = DateTime.now();
-    final initial = _birth ?? DateTime(now.year - 25, now.month, now.day);
+    DateTime? initial;
+    try {
+      final parts = _birthDateCtrl.text.trim().split("-");
+      if (parts.length == 3) {
+        initial = DateTime(int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
+      }
+    } catch (_) {}
+
+    initial ??= DateTime(now.year - 25, now.month, now.day);
 
     final picked = await showDatePicker(
       context: context,
@@ -35,47 +51,54 @@ class _NumerologyFormScreenState extends State<NumerologyFormScreen> {
       lastDate: DateTime(now.year, 12, 31),
     );
 
-    if (picked != null) setState(() => _birth = picked);
+    if (picked != null) {
+      final y = picked.year.toString().padLeft(4, "0");
+      final m = picked.month.toString().padLeft(2, "0");
+      final d = picked.day.toString().padLeft(2, "0");
+      _birthDateCtrl.text = "$y-$m-$d";
+      setState(() {});
+    }
   }
 
-  Future<void> _startAndGenerate() async {
+  Future<void> _continueToPayment() async {
     final name = _nameCtrl.text.trim();
-    if (name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Ad Soyad gir")),
-      );
-      return;
-    }
-    if (_birth == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Doğum tarihi seç")),
-      );
-      return;
-    }
+    final birthDate = _birthDateCtrl.text.trim();
+    final topic = _topicCtrl.text.trim().isEmpty ? "genel" : _topicCtrl.text.trim();
+    final question = _questionCtrl.text.trim();
+
+    if (name.isEmpty) return _toast("Ad Soyad gir");
+    if (birthDate.isEmpty) return _toast("Doğum tarihi seç/gir (YYYY-AA-GG)");
+    if (_loading) return;
 
     setState(() => _loading = true);
+
     try {
-      final reading = await NumerologyApi.start(
+      final deviceId = await DeviceIdService.getOrCreate();
+
+      final NumerologyReading reading = await NumerologyApi.start(
         name: name,
-        birthDate: _fmt(_birth!),
-        topic: "genel",
-        question: _questionCtrl.text.trim().isEmpty ? null : _questionCtrl.text.trim(),
+        birthDate: birthDate,
+        topic: topic,
+        question: question.isEmpty ? null : question,
+        deviceId: deviceId,
       );
 
       if (!mounted) return;
-      Navigator.of(context).pushReplacement(
+
+      // ✅ ÖNCE ÖDEME
+      Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => NumerologyLoadingScreen(
+          builder: (_) => NumerologyPaymentScreen(
             readingId: reading.id,
-            title: "Numeroloji Analizi",
+            name: name,
+            birthDate: birthDate,
+            question: question,
           ),
         ),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Hata: $e")),
-      );
+      _toast("Hata: $e");
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -84,8 +107,23 @@ class _NumerologyFormScreenState extends State<NumerologyFormScreen> {
   @override
   void dispose() {
     _nameCtrl.dispose();
+    _birthDateCtrl.dispose();
+    _topicCtrl.dispose();
     _questionCtrl.dispose();
     super.dispose();
+  }
+
+  Widget _field({required Widget child}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.35),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: child,
+    );
   }
 
   @override
@@ -104,7 +142,7 @@ class _NumerologyFormScreenState extends State<NumerologyFormScreen> {
                   icon: const Icon(Icons.arrow_back, color: Colors.white),
                 ),
                 const Text(
-                  "Numeroloji – Bilgiler",
+                  "Nümeroloji – Bilgiler",
                   style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800),
                 ),
               ],
@@ -112,18 +150,14 @@ class _NumerologyFormScreenState extends State<NumerologyFormScreen> {
             const SizedBox(height: 10),
 
             Expanded(
-              child: Padding(
+              child: SingleChildScrollView(
                 padding: const EdgeInsets.symmetric(horizontal: 18),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      "Analiz için gerekli bilgiler",
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.95),
-                        fontSize: 14,
-                        fontWeight: FontWeight.w900,
-                      ),
+                    const Text(
+                      "Gerekli Bilgiler",
+                      style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w900),
                     ),
                     const SizedBox(height: 12),
 
@@ -145,15 +179,30 @@ class _NumerologyFormScreenState extends State<NumerologyFormScreen> {
                         children: [
                           Expanded(
                             child: Text(
-                              _birth == null ? "Doğum Tarihi: Seçilmedi" : "Doğum Tarihi: ${_fmt(_birth!)}",
+                              _birthDateCtrl.text.trim().isEmpty
+                                  ? "Doğum Tarihi: Seçilmedi"
+                                  : "Doğum Tarihi: ${_birthDateCtrl.text.trim()}",
                               style: const TextStyle(color: Colors.white),
                             ),
                           ),
                           IconButton(
-                            onPressed: _pickDate,
+                            onPressed: _pickBirthDate,
                             icon: const Icon(Icons.calendar_month, color: Colors.white70),
                           ),
                         ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    _field(
+                      child: TextField(
+                        controller: _topicCtrl,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(
+                          hintText: "Konu (genel/aşk/kariyer/para vb.)",
+                          hintStyle: TextStyle(color: Colors.white54),
+                          border: InputBorder.none,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -164,22 +213,14 @@ class _NumerologyFormScreenState extends State<NumerologyFormScreen> {
                         maxLines: 3,
                         style: const TextStyle(color: Colors.white),
                         decoration: const InputDecoration(
-                          hintText: "İstersen soru yaz (örn: 2026'da kariyerimde ne öne çıkıyor?)",
+                          hintText: "Sorun (opsiyonel)",
                           hintStyle: TextStyle(color: Colors.white54),
                           border: InputBorder.none,
                         ),
                       ),
                     ),
 
-                    const SizedBox(height: 12),
-                    Text(
-                      "Not: Bu analiz bir rehberdir; kesin hüküm değil, farkındalık ve yön gösterme amaçlıdır.",
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.70),
-                        fontSize: 12,
-                        height: 1.35,
-                      ),
-                    ),
+                    const SizedBox(height: 18),
                   ],
                 ),
               ),
@@ -196,29 +237,16 @@ class _NumerologyFormScreenState extends State<NumerologyFormScreen> {
                     foregroundColor: Colors.black,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   ),
-                  onPressed: _loading ? null : _startAndGenerate,
+                  onPressed: _loading ? null : _continueToPayment,
                   child: _loading
                       ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text("Analizi Başlat", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
+                      : const Text("Devam → Ödeme", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
                 ),
               ),
             ),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _field({required Widget child}) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.35),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white12),
-      ),
-      child: child,
     );
   }
 }

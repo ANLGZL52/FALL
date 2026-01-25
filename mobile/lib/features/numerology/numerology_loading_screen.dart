@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:lunaura/widgets/mystic_scaffold.dart';
 import 'package:lunaura/services/device_id_service.dart';
 import 'package:lunaura/services/numerology_api.dart';
+import 'package:lunaura/models/numerology_reading.dart';
 import 'package:lunaura/features/numerology/numerology_result_screen.dart';
 
 class NumerologyLoadingScreen extends StatefulWidget {
@@ -48,7 +49,8 @@ class _NumerologyLoadingScreenState extends State<NumerologyLoadingScreen> {
       const maxTry = 6;
       const baseDelayMs = 900;
 
-      late final generated;
+      late NumerologyReading generated;
+
       for (var i = 1; i <= maxTry; i++) {
         try {
           generated = await NumerologyApi.generate(
@@ -57,8 +59,7 @@ class _NumerologyLoadingScreenState extends State<NumerologyLoadingScreen> {
           );
           break;
         } catch (e) {
-          // backend tarafında birazdan 402 yapacağız; şimdilik 400 de retry olsun.
-          final retryable = _isHttp(e, 400) || _isHttp(e, 402) || _isHttp(e, 409);
+          final retryable = _isHttp(e, 402) || _isHttp(e, 409) || _isHttp(e, 500);
           if (retryable && i < maxTry) {
             await Future.delayed(Duration(milliseconds: baseDelayMs * i));
             continue;

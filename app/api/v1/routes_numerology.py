@@ -76,16 +76,19 @@ def generate(reading_id: str, session: Session = Depends(get_session)):
     result_text = (obj.get("result_text") or "").strip()
 
     # ✅ idempotent: sonuç varsa direkt dön
-    if result_text and status in ("done", "completed"):
-        # (completed eski kalmış olabilir; biz yine de kabul ediyoruz)
-        if status != "done":
-            _repo.set_status(session=session, reading_id=reading_id, status="done")
-            obj = _repo.get(session=session, reading_id=reading_id) or obj
+    if result_text and status == "done":
         return obj
 
     # ✅ processing ise tekrar üretme
     if status == "processing":
         return obj
+
+    # ✅ paid değilse (started vs) zorla paid'e çekmeyelim; ama ödeme varsa paid olmalı
+    # Yine de güvenli olsun:
+    if status not in ("paid", "processing", "done"):
+        _repo.set_status(session=session, reading_id=reading_id, status="paid")
+        obj = _repo.get(session=session, reading_id=reading_id) or obj
+        status = (obj.get("status") or "").lower().strip()
 
     # ✅ processing’e çek (generate kilidi)
     _repo.set_status(session=session, reading_id=reading_id, status="processing")
@@ -106,10 +109,9 @@ def generate(reading_id: str, session: Session = Depends(get_session)):
         return updated
 
     except HTTPException:
-        # HTTPException'ı olduğu gibi fırlat ama önce paid'e çek
+        # ✅ hata olursa paid'e geri al ki tekrar deneme mümkün olsun
         _repo.set_status(session=session, reading_id=reading_id, status="paid")
         raise
     except Exception as e:
-        # ✅ hata olursa paid'e geri al ki tekrar deneme mümkün olsun
         _repo.set_status(session=session, reading_id=reading_id, status="paid")
         raise HTTPException(status_code=500, detail=f"Numerology yorum üretilemedi: {e}")

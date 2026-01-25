@@ -1,3 +1,4 @@
+// lib/services/numerology_api.dart
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
@@ -61,82 +62,58 @@ class NumerologyApi {
     required String birthDate, // YYYY-MM-DD
     required String topic,
     String? question,
-    String? deviceId,
+    required String deviceId,
   }) async {
-    final q = (question ?? '').trim();
+    final res = await http
+        .post(
+          _u('/numerology/start'),
+          headers: ApiBase.headers(deviceId: deviceId),
+          body: jsonEncode({
+            "name": name,
+            "birth_date": birthDate,
+            "topic": topic,
+            "question": question,
+          }),
+        )
+        .timeout(const Duration(seconds: 30));
 
-    final res = await http.post(
-      _u('/numerology/start'),
-      headers: ApiBase.headers(deviceId: deviceId),
-      body: jsonEncode({
-        "name": name,
-        "birth_date": birthDate,
-        "topic": topic,
-        "question": q.isEmpty ? null : q,
-      }),
-    );
-
-    if (res.statusCode != 200) {
-      throw Exception(
-        "numerology/start failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}",
-      );
+    if (res.statusCode >= 400) {
+      throw Exception("numerology/start failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}");
     }
-
     return NumerologyReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
-  /// LEGACY (mock) için kalsın.
-  /// Real ödeme: /payments/verify server-side unlock yapıyor, burada çağırma.
-  static Future<NumerologyReading> markPaid({
+  static Future<NumerologyReading> get({
     required String readingId,
-    String? paymentRef,
-    String? deviceId,
+    required String deviceId,
   }) async {
-    final ref = (paymentRef ?? '').trim();
-    if (ref.isNotEmpty && !ref.startsWith("TEST-")) {
-      throw Exception("markPaid legacy only. Real payments use /payments/verify.");
+    final res = await http
+        .get(
+          _u('/numerology/$readingId'),
+          headers: ApiBase.headers(deviceId: deviceId),
+        )
+        .timeout(const Duration(seconds: 30));
+
+    if (res.statusCode >= 400) {
+      throw Exception("numerology/get failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}");
     }
-
-    final res = await http.post(
-      _u('/numerology/$readingId/mark-paid'),
-      headers: ApiBase.headers(deviceId: deviceId),
-      body: jsonEncode({"payment_ref": paymentRef}),
-    );
-
-    if (res.statusCode != 200) {
-      throw Exception(
-        "numerology/mark-paid failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}",
-      );
-    }
-
     return NumerologyReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
   static Future<NumerologyReading> generate({
     required String readingId,
-    String? deviceId,
+    required String deviceId,
   }) async {
-    final res = await http.post(
-      _u('/numerology/$readingId/generate'),
-      headers: ApiBase.headers(deviceId: deviceId),
-    );
+    final res = await http
+        .post(
+          _u('/numerology/$readingId/generate'),
+          headers: ApiBase.headers(deviceId: deviceId),
+        )
+        .timeout(const Duration(seconds: 150));
 
-    if (res.statusCode != 200) {
-      throw Exception(
-        "numerology/generate failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}",
-      );
+    if (res.statusCode >= 400) {
+      throw Exception("numerology/generate failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}");
     }
-
     return NumerologyReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
-  }
-
-  static Future<String> generateText({
-    required String readingId,
-    String? deviceId,
-  }) async {
-    final r = await generate(readingId: readingId, deviceId: deviceId);
-    final t = (r.resultText ?? '').trim();
-    if (t.isEmpty) throw Exception("generateText: result_text empty");
-    return t;
   }
 }

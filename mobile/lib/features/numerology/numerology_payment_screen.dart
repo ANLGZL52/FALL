@@ -55,7 +55,6 @@ class _NumerologyPaymentScreenState extends State<NumerologyPaymentScreen> {
     setState(() => _loading = true);
 
     try {
-      // header için device id üret
       await DeviceIdService.getOrCreate();
 
       final shouldUseIap = kReleaseMode || debugUseStoreIap;
@@ -72,7 +71,6 @@ class _NumerologyPaymentScreenState extends State<NumerologyPaymentScreen> {
         if (mounted) setState(() => _lastPaymentId = verify.paymentId);
       }
 
-      // ✅ generate burada YOK. sadece loading’e geç.
       await _goLoading();
     } catch (e) {
       if (!mounted) return;
