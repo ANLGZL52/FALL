@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Optional
+from uuid import uuid4
 
 from sqlmodel import SQLModel, Field
 
@@ -10,7 +11,8 @@ from sqlmodel import SQLModel, Field
 class BirthChartReadingDB(SQLModel, table=True):
     __tablename__ = "birthchart_readings"
 
-    id: str = Field(primary_key=True, index=True)
+    # ✅ PK default ver (Postgres insert için şart)
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True, index=True)
 
     topic: str = Field(default="genel", index=True)
     question: Optional[str] = Field(default=None)

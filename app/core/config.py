@@ -28,6 +28,8 @@ class Settings(BaseSettings):
 
     # Storage
     storage_dir: Path = Field(default=BASE_DIR / "storage", alias="STORAGE_DIR")
+
+    # Optional: dışarıdan override edilebilir
     upload_dir: Optional[Path] = Field(default=None, alias="UPLOAD_DIR")
 
     # DB
@@ -41,14 +43,12 @@ class Settings(BaseSettings):
     openai_model: str = Field(default="gpt-4.1-mini", alias="OPENAI_MODEL")
     openai_max_output_tokens: int = Field(default=2500, alias="OPENAI_MAX_OUTPUT_TOKENS")
 
-    # Railway için timeout / retry
+    # Railway timeout / retry
     openai_timeout_seconds: int = Field(default=90, alias="OPENAI_TIMEOUT_SECONDS")
     openai_max_retries: int = Field(default=2, alias="OPENAI_MAX_RETRIES")
 
-    # CORS
     cors_origins_raw: str = Field(default="*", alias="CORS_ORIGINS")
 
-    # IAP
     allow_stub_iap: bool = Field(default=False, alias="ALLOW_STUB_IAP")
     google_play_package_name: str = Field(default="", alias="GOOGLE_PLAY_PACKAGE_NAME")
     apple_bundle_id: str = Field(default="", alias="APPLE_BUNDLE_ID")
@@ -59,7 +59,8 @@ class Settings(BaseSettings):
 
     @property
     def upload_dir_effective(self) -> Path:
-        # UPLOAD_DIR env yoksa: storage/uploads
+        # ✅ TEK KAYNAK:
+        # UPLOAD_DIR verilmediyse otomatik storage/uploads
         return self.upload_dir or (self.storage_dir / "uploads")
 
     @property

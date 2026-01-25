@@ -22,12 +22,9 @@ def _safe_filename(original: str) -> str:
 async def save_uploads(reading_id: str, files: List[UploadFile]) -> List[str]:
     """
     Dosyaları diske yazar ve DB için relative path listesi döndürür.
-
-    DÖNÜŞ:
-      ["storage/uploads/<reading_id>/<filename>.jpg", ...]  (relative)
+    DÖNÜŞ: ["storage/uploads/<reading_id>/<filename>.jpg", ...]
     """
-
-    # ✅ KRİTİK FIX: upload_dir None olabilir (Railway). Effective path kullan.
+    # ✅ KRİTİK: upload_dir None olabilir → upload_dir_effective kullan
     dest_dir = settings.upload_dir_effective / reading_id
     dest_dir.mkdir(parents=True, exist_ok=True)
 
@@ -41,7 +38,6 @@ async def save_uploads(reading_id: str, files: List[UploadFile]) -> List[str]:
         with open(dest_path, "wb") as out:
             out.write(data)
 
-        # ✅ DB'ye relative path kaydediyoruz
         rel_path = os.path.relpath(dest_path, start=Path("."))
         rel_path = rel_path.replace("\\", "/")
         saved_paths.append(rel_path)
