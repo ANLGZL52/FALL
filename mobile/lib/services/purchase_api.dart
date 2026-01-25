@@ -74,7 +74,7 @@ class PaymentVerifyResult {
 
   factory PaymentVerifyResult.fromJson(Map<String, dynamic> j) {
     final okVal = j.containsKey('ok') ? j['ok'] : true;
-    final ok = okVal is bool ? okVal : (okVal.toString().totoLowerCase() == 'true');
+    final ok = okVal is bool ? okVal : (okVal.toString().toLowerCase() == 'true');
 
     final verVal = j.containsKey('verified') ? j['verified'] : false;
     final verified = verVal is bool ? verVal : (verVal.toString().toLowerCase() == 'true');
