@@ -62,6 +62,28 @@ class NumerologyApi {
     return NumerologyReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
+  /// ✅ DEBUG / legacy: backend sadece "TEST-..." ile kabul eder.
+  static Future<NumerologyReading> markPaid({
+    required String readingId,
+    required String paymentRef, // "TEST-..."
+    required String deviceId,
+  }) async {
+    final res = await http
+        .post(
+          _u('/numerology/$readingId/mark-paid'),
+          headers: ApiBase.headers(deviceId: deviceId),
+          body: jsonEncode({
+            "payment_ref": paymentRef,
+          }),
+        )
+        .timeout(const Duration(seconds: 30));
+
+    if (res.statusCode >= 400) {
+      throw Exception("numerology/mark-paid failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}");
+    }
+    return NumerologyReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
+
   static Future<NumerologyReading> generate({
     required String readingId,
     required String deviceId,

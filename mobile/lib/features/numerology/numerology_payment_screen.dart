@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../services/device_id_service.dart';
 import '../../services/iap_service.dart';
 import '../../services/product_catalog.dart';
+import '../../services/numerology_api.dart';
 
 import '../../widgets/glass_card.dart';
 import '../../widgets/gradient_button.dart';
@@ -55,10 +56,12 @@ class _NumerologyPaymentScreenState extends State<NumerologyPaymentScreen> {
     setState(() => _loading = true);
 
     try {
-      await DeviceIdService.getOrCreate();
+      final deviceId = await DeviceIdService.getOrCreate();
 
       final shouldUseIap = kReleaseMode || debugUseStoreIap;
+
       if (shouldUseIap) {
+        // ✅ GERÇEK ÖDEME
         final verify = await IapService.instance.buyAndVerify(
           readingId: widget.readingId,
           sku: _sku,
@@ -69,6 +72,15 @@ class _NumerologyPaymentScreenState extends State<NumerologyPaymentScreen> {
         }
 
         if (mounted) setState(() => _lastPaymentId = verify.paymentId);
+      } else {
+        // ✅ DEBUG: Para harcamadan paid işaretle (backend sadece TEST-... kabul eder)
+        final ref = "TEST-${DateTime.now().millisecondsSinceEpoch}";
+        await NumerologyApi.markPaid(
+          readingId: widget.readingId,
+          paymentRef: ref,
+          deviceId: deviceId,
+        );
+        if (mounted) setState(() => _lastPaymentId = ref);
       }
 
       await _goLoading();

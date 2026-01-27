@@ -45,7 +45,7 @@ class _NumerologyLoadingScreenState extends State<NumerologyLoadingScreen> {
 
       final deviceId = await DeviceIdService.getOrCreate();
 
-      // ✅ generate için retry/backoff (ödeme işareti DB’de gecikirse)
+      // ✅ generate için retry/backoff (409/500 gibi geçici durumlarda)
       const maxTry = 6;
       const baseDelayMs = 900;
 
@@ -59,7 +59,8 @@ class _NumerologyLoadingScreenState extends State<NumerologyLoadingScreen> {
           );
           break;
         } catch (e) {
-          final retryable = _isHttp(e, 402) || _isHttp(e, 409) || _isHttp(e, 500);
+          // ❌ 402 (Payment Required) retryable değil
+          final retryable = _isHttp(e, 409) || _isHttp(e, 500);
           if (retryable && i < maxTry) {
             await Future.delayed(Duration(milliseconds: baseDelayMs * i));
             continue;
