@@ -9,18 +9,14 @@ import '../coffee/coffee_screen.dart';
 import '../hand/hand_screen.dart';
 import '../tarot/tarot_intro_screen.dart';
 import '../numerology/numerology_intro_screen.dart';
-
-// ✅ Doğum Haritası
 import '../birthchart/birthchart_intro_screen.dart';
-
-// ✅ Kişilik Analizi
 import '../personality/personality_intro_screen.dart';
-
-// ✅ Sinastri
 import '../synastry/synastry_intro_screen.dart';
 
-// ✅ IAP Debug
 import '../iap/iap_debug_screen.dart';
+
+// ✅ NEW
+import '../profile/profile_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -57,6 +53,10 @@ class HomeScreen extends StatelessWidget {
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => const IapDebugScreen()));
   }
 
+  void _openProfile(BuildContext context) {
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfileScreen()));
+  }
+
   @override
   Widget build(BuildContext context) {
     return MysticScaffold(
@@ -68,7 +68,6 @@ class HomeScreen extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
               child: Column(
-                // ❗ const LIST KULLANMIYORUZ (Windows "Not a constant expression" fix)
                 children: [
                   const Text(
                     'LunaAura',
@@ -91,13 +90,11 @@ class HomeScreen extends StatelessWidget {
               ),
             ),
 
-            // ✅ Kartlar listesi
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: ListView(
                   children: [
-                    // ✅ Debug’da IAP kartı
                     if (!kReleaseMode) ...[
                       FeatureCard(
                         title: 'IAP Debug',
@@ -167,23 +164,11 @@ class HomeScreen extends StatelessWidget {
               ),
             ),
 
-            // ✅ Bottom bar
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.42),
-                border: const Border(
-                  top: BorderSide(color: Colors.white12, width: 0.5),
-                ),
-              ),
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _BottomItem(icon: Icons.person_outline, label: 'Profil'),
-                  _BottomItem(icon: Icons.chat_bubble_outline, label: 'Yorumlar'),
-                  _BottomItem(icon: Icons.shopping_bag_outlined, label: 'Mağaza'),
-                ],
-              ),
+            // ✅ Yeni bottom bar (Home + Profil)
+            _BottomBar(
+              onTapHome: () {}, // zaten home'dasın
+              onTapProfile: () => _openProfile(context),
+              active: _BottomTab.home,
             ),
           ],
         ),
@@ -192,27 +177,85 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
-class _BottomItem extends StatelessWidget {
-  final IconData icon;
-  final String label;
+enum _BottomTab { home, profile }
 
-  const _BottomItem({required this.icon, required this.label});
+class _BottomBar extends StatelessWidget {
+  final VoidCallback onTapHome;
+  final VoidCallback onTapProfile;
+  final _BottomTab active;
+
+  const _BottomBar({
+    required this.onTapHome,
+    required this.onTapProfile,
+    required this.active,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 22, color: Colors.white70),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: TextStyle(
-            color: Colors.white.withOpacity(0.70),
-            fontSize: 11,
-          ),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.42),
+        border: const Border(
+          top: BorderSide(color: Colors.white12, width: 0.5),
         ),
-      ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          _BottomItem(
+            icon: Icons.home_outlined,
+            label: 'Ana Sayfa',
+            active: active == _BottomTab.home,
+            onTap: onTapHome,
+          ),
+          _BottomItem(
+            icon: Icons.person_outline,
+            label: 'Profil',
+            active: active == _BottomTab.profile,
+            onTap: onTapProfile,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BottomItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+
+  const _BottomItem({
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = active ? const Color(0xFFF5C361) : Colors.white70;
+    final textColor = active ? const Color(0xFFF5C361) : Colors.white.withOpacity(0.70);
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 22, color: color),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(color: textColor, fontSize: 11, fontWeight: FontWeight.w800),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -10,6 +10,7 @@ from app.api.v1.routes_personality import router as personality_router
 from app.api.v1.routes_payments import router as payments_router
 from app.api.v1.routes_synastry import router as synastry_router
 from app.api.v1.routes_admin import router as admin_router  # ✅ NEW
+from app.api.v1.profile import router as profile_router
 
 api_router = APIRouter()
 
@@ -22,3 +23,4 @@ api_router.include_router(personality_router)
 api_router.include_router(payments_router)
 api_router.include_router(synastry_router)
 api_router.include_router(admin_router)  # ✅ NEW
+api_router.include_router(profile_router)

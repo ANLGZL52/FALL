@@ -1,4 +1,3 @@
-# app/api/v1/routes_coffee.py
 from __future__ import annotations
 
 import os
@@ -11,6 +10,7 @@ from sqlmodel import Session
 
 from app.db import get_session
 from app.core.config import settings
+from app.core.device import get_device_id
 from app.models.coffee_db import CoffeeReadingDB
 from app.repositories.coffee_repo import (
     get_reading,
@@ -35,10 +35,31 @@ class RatingRequest(BaseModel):
     rating: int
 
 
-def _get_or_404(session: Session, reading_id: str) -> CoffeeReadingDB:
+def _get_or_404_owner(session: Session, reading_id: str, device_id: str) -> CoffeeReadingDB:
+    """
+    ✅ Ownership check: sadece aynı cihaz bu reading'e erişebilir.
+    Legacy kayıtlar için device_id boşsa, ilk erişimde bağlanır.
+    """
     r = get_reading(session, reading_id)
     if not r:
         raise HTTPException(status_code=404, detail="Reading not found")
+
+    rid = (getattr(r, "device_id", None) or "").strip()
+
+    # ✅ Eğer kayıt device_id ile kilitliyse ve farklı cihazsa => 404
+    if rid and rid != device_id:
+        raise HTTPException(status_code=404, detail="Reading not found")
+
+    # ✅ Legacy: device_id boşsa ilk erişimde bağla
+    if not rid:
+        try:
+            setattr(r, "device_id", device_id)
+            r.updated_at = datetime.utcnow()
+            update_reading(session, r)
+        except Exception:
+            # Kolon yoksa / migration eksikse patlatma
+            pass
+
     return r
 
 
@@ -73,7 +94,11 @@ def _delete_paths(paths: List[str]) -> None:
 
 
 @router.post("/start", response_model=CoffeeReading)
-async def start(req: CoffeeStartRequest, session: Session = Depends(get_session)):
+async def start(
+    req: CoffeeStartRequest,
+    session: Session = Depends(get_session),
+    device_id: str = Depends(get_device_id),
+):
     """
     Akış:
       1) /coffee/start -> reading_id (pending_payment)
@@ -86,7 +111,6 @@ async def start(req: CoffeeStartRequest, session: Session = Depends(get_session)
         question=req.question,
         name=req.name,
         age=req.age,
-        # ✅ CoffeeStatus Literal ile uyumlu olmalı:
         status="pending_payment",
         is_paid=False,
         payment_ref=None,
@@ -95,6 +119,13 @@ async def start(req: CoffeeStartRequest, session: Session = Depends(get_session)
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )
+
+    # ✅ device_id yaz (kolon varsa)
+    try:
+        setattr(db_obj, "device_id", device_id)
+    except Exception:
+        pass
+
     db_obj = create_reading(session, db_obj)
     return _to_schema(db_obj)
 
@@ -105,8 +136,9 @@ async def upload_images(
     reading_id: str,
     files: List[UploadFile] = File(...),
     session: Session = Depends(get_session),
+    device_id: str = Depends(get_device_id),
 ):
-    _get_or_404(session, reading_id)
+    _get_or_404_owner(session, reading_id, device_id)
 
     # ✅ 3-5 foto kuralı
     if len(files) < settings.min_photos or len(files) > settings.max_photos:
@@ -117,29 +149,31 @@ async def upload_images(
 
     saved = await save_uploads(reading_id, files)
 
-    # ✅ Upload sonrası doğrulama: kahve fincanı içi mi?
     verdict = validate_coffee_images(saved)
     if not verdict.get("ok", False):
         _delete_paths(saved)
-        # ✅ Kullanıcı dostu mesaj
         raise HTTPException(
             status_code=400,
             detail="Lütfen yalnızca kahve fincanının iç kısmının fotoğrafını yükleyiniz.",
         )
 
-    r = set_photos(session, reading_id, saved)  # status -> photos_uploaded
-    return _to_schema(r)
+    r2 = set_photos(session, reading_id, saved)
+    return _to_schema(r2)
 
 
 @router.post("/{reading_id}/mark-paid", response_model=CoffeeReading)
-async def mark_paid(reading_id: str, body: MarkPaidRequest, session: Session = Depends(get_session)):
+async def mark_paid(
+    reading_id: str,
+    body: MarkPaidRequest,
+    session: Session = Depends(get_session),
+    device_id: str = Depends(get_device_id),
+):
     """
     ✅ Legacy/mock akış (TEST-...).
     Real ödeme: /payments/verify.
     """
-    r = _get_or_404(session, reading_id)
+    r = _get_or_404_owner(session, reading_id, device_id)
 
-    # ✅ foto yoksa ödeme yok
     if not list_photos(r):
         raise HTTPException(status_code=400, detail="Ödeme için önce fotoğraf yüklemelisin.")
 
@@ -152,7 +186,6 @@ async def mark_paid(reading_id: str, body: MarkPaidRequest, session: Session = D
             detail="mark-paid is legacy only. Use /payments/verify for real payments.",
         )
 
-    # ✅ idempotent
     if r.is_paid and r.payment_ref:
         return _to_schema(r)
 
@@ -165,15 +198,12 @@ async def mark_paid(reading_id: str, body: MarkPaidRequest, session: Session = D
 
 
 @router.post("/{reading_id}/generate", response_model=CoffeeReading)
-async def generate(reading_id: str, session: Session = Depends(get_session)):
-    """
-    - Foto yoksa 400
-    - Ödeme yoksa 402
-    - Sonuç varsa idempotent dön
-    - processing ise tekrar üretme
-    - Hata olursa status'u paid'e geri çek
-    """
-    r = _get_or_404(session, reading_id)
+async def generate(
+    reading_id: str,
+    session: Session = Depends(get_session),
+    device_id: str = Depends(get_device_id),
+):
+    r = _get_or_404_owner(session, reading_id, device_id)
 
     photos = list_photos(r)
     if not photos:
@@ -185,15 +215,12 @@ async def generate(reading_id: str, session: Session = Depends(get_session)):
     status = (r.status or "").lower().strip()
     result_text = (getattr(r, "result_text", None) or "").strip()
 
-    # ✅ idempotent
     if result_text:
         return _to_schema(r)
 
-    # ✅ processing ise tekrar OpenAI çağırma
     if status == "processing":
         return _to_schema(r)
 
-    # ✅ bir kez daha doğrula (edge-case)
     verdict = validate_coffee_images(photos)
     if not verdict.get("ok", False):
         raise HTTPException(
@@ -201,7 +228,6 @@ async def generate(reading_id: str, session: Session = Depends(get_session)):
             detail="Lütfen yalnızca kahve fincanının iç kısmının fotoğrafını yükleyiniz.",
         )
 
-    # processing
     set_status(session, reading_id, "processing")
 
     try:
@@ -238,14 +264,23 @@ async def generate(reading_id: str, session: Session = Depends(get_session)):
 
 
 @router.get("/{reading_id}", response_model=CoffeeReading)
-async def detail(reading_id: str, session: Session = Depends(get_session)):
-    r = _get_or_404(session, reading_id)
+async def detail(
+    reading_id: str,
+    session: Session = Depends(get_session),
+    device_id: str = Depends(get_device_id),
+):
+    r = _get_or_404_owner(session, reading_id, device_id)
     return _to_schema(r)
 
 
 @router.post("/{reading_id}/rate", response_model=CoffeeReading)
-async def rate(reading_id: str, req: RatingRequest, session: Session = Depends(get_session)):
-    r = _get_or_404(session, reading_id)
+async def rate(
+    reading_id: str,
+    req: RatingRequest,
+    session: Session = Depends(get_session),
+    device_id: str = Depends(get_device_id),
+):
+    r = _get_or_404_owner(session, reading_id, device_id)
     if req.rating < 1 or req.rating > 5:
         raise HTTPException(status_code=400, detail="Rating must be 1..5")
     r.rating = req.rating

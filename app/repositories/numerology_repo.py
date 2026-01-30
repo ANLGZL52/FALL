@@ -1,4 +1,3 @@
-# app/repositories/numerology_repo.py
 from __future__ import annotations
 
 from datetime import datetime
@@ -54,10 +53,11 @@ def mark_paid_low(session: Session, reading_id: str, payment_ref: Optional[str])
 
 def set_status_low(session: Session, reading_id: str, status: str) -> NumerologyReadingDB:
     """
-    ✅ started/paid/processing/done standardı
+    ✅ Standard: started / paid / processing / completed
+    (done yerine completed kullanıyoruz; diğer modüllerle aynı olsun)
     """
     st = (status or "").lower().strip()
-    if st not in ("started", "paid", "processing", "done"):
+    if st not in ("started", "paid", "processing", "completed"):
         raise ValueError(f"Invalid status: {status}")
 
     obj = get_reading(session, reading_id)
@@ -73,8 +73,8 @@ def set_result_low(session: Session, reading_id: str, result_text: str) -> Numer
     if not obj:
         raise ValueError("Reading not found")
 
-    obj.status = "done"  # ✅ completed yerine done
     obj.result_text = result_text
+    obj.status = "completed"  # ✅ standard
     return update_reading(session, obj)
 
 
@@ -90,6 +90,7 @@ class NumerologyRepo:
         birth_date: str,
         topic: str,
         question: Optional[str],
+        device_id: Optional[str] = None,  # ✅ NEW
     ) -> dict:
         obj = NumerologyReadingDB(
             id=uuid4().hex,
@@ -99,7 +100,16 @@ class NumerologyRepo:
             birth_date=birth_date,
             status="started",
             is_paid=False,
+            payment_ref=None,
+            result_text=None,
         )
+
+        # ✅ device_id ilişkilendir (model patch’iyle kolon eklenecek)
+        try:
+            setattr(obj, "device_id", (device_id or "").strip() or None)
+        except Exception:
+            pass
+
         created = create_reading(session, obj)
         return _dump(created)
 

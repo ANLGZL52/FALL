@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlmodel import Session
 
 from app.db import get_session
+from app.core.device import get_device_id
 from app.models.hand_db import HandReadingDB
 from app.repositories.hand_repo import (
     get_reading,
@@ -34,10 +35,31 @@ class RatingRequest(BaseModel):
     rating: int
 
 
-def _get_or_404(session: Session, reading_id: str) -> HandReadingDB:
+def _get_or_404_owner(session: Session, reading_id: str, device_id: str) -> HandReadingDB:
+    """
+    ✅ Ownership check: sadece aynı cihaz bu reading'e erişebilir.
+    Legacy kayıtlar için device_id boşsa ilk erişimde bağlanır.
+    """
     r = get_reading(session, reading_id)
     if not r:
         raise HTTPException(status_code=404, detail="El falı bulunamadı.")
+
+    rid = (getattr(r, "device_id", None) or "").strip()
+
+    # ✅ Eğer kayıt device_id ile kilitliyse ve farklı cihazsa => 404
+    if rid and rid != device_id:
+        raise HTTPException(status_code=404, detail="El falı bulunamadı.")
+
+    # ✅ Legacy: device_id boşsa ilk erişimde bağla
+    if not rid:
+        try:
+            setattr(r, "device_id", device_id)
+            r.updated_at = datetime.utcnow()
+            update_reading(session, r)
+        except Exception:
+            # Kolon yoksa / migration eksikse patlatma
+            pass
+
     return r
 
 
@@ -74,11 +96,6 @@ def _delete_paths(paths: List[str]) -> None:
 
 
 def _hand_upload_user_message(verdict: dict) -> str:
-    """
-    ✅ Kullanıcıya net/insancıl mesaj üretir.
-    LLM'in 'reason' alanını direkt basmak bazen garip olabiliyor;
-    bu yüzden güvenli bir üst mesaj + kısa neden.
-    """
     reason = (verdict.get("reason") or "").strip()
     base = (
         "Bu görseller el falı için uygun görünmüyor. "
@@ -94,7 +111,11 @@ def _hand_upload_user_message(verdict: dict) -> str:
 # START
 # ------------------------------------------------
 @router.post("/start", response_model=HandReading)
-async def start(req: HandStartRequest, session: Session = Depends(get_session)):
+async def start(
+    req: HandStartRequest,
+    session: Session = Depends(get_session),
+    device_id: str = Depends(get_device_id),
+):
     db_obj = HandReadingDB(
         id=str(uuid4()),
         topic=req.topic,
@@ -114,20 +135,27 @@ async def start(req: HandStartRequest, session: Session = Depends(get_session)):
         updated_at=datetime.utcnow(),
     )
 
+    # ✅ device_id yaz (kolon varsa)
+    try:
+        setattr(db_obj, "device_id", device_id)
+    except Exception:
+        pass
+
     db_obj = create_reading(session, db_obj)
     return _to_schema(db_obj)
 
 
 # ------------------------------------------------
-# UPLOAD IMAGES (🔥 KRİTİK KISIM)
+# UPLOAD IMAGES
 # ------------------------------------------------
 @router.post("/{reading_id}/upload-images", response_model=HandReading)
 async def upload_images(
     reading_id: str,
     files: List[UploadFile] = File(...),
     session: Session = Depends(get_session),
+    device_id: str = Depends(get_device_id),
 ):
-    _get_or_404(session, reading_id)
+    _get_or_404_owner(session, reading_id, device_id)
 
     # ✅ 1–3 foto kuralı
     if len(files) < 1 or len(files) > 3:
@@ -138,7 +166,6 @@ async def upload_images(
 
     saved = await save_uploads(reading_id, files)
 
-    # 🔒 EL DOĞRULAMA
     verdict = validate_hand_images(saved)
     if not verdict.get("ok", False):
         _delete_paths(saved)
@@ -147,16 +174,21 @@ async def upload_images(
             detail=_hand_upload_user_message(verdict),
         )
 
-    r = set_photos(session, reading_id, saved)
-    return _to_schema(r)
+    r2 = set_photos(session, reading_id, saved)
+    return _to_schema(r2)
 
 
 # ------------------------------------------------
 # MARK PAID (legacy / mock)
 # ------------------------------------------------
 @router.post("/{reading_id}/mark-paid", response_model=HandReading)
-async def mark_paid(reading_id: str, body: MarkPaidRequest, session: Session = Depends(get_session)):
-    r = _get_or_404(session, reading_id)
+async def mark_paid(
+    reading_id: str,
+    body: MarkPaidRequest,
+    session: Session = Depends(get_session),
+    device_id: str = Depends(get_device_id),
+):
+    r = _get_or_404_owner(session, reading_id, device_id)
 
     if not list_photos(r):
         raise HTTPException(
@@ -173,7 +205,8 @@ async def mark_paid(reading_id: str, body: MarkPaidRequest, session: Session = D
             detail="Gerçek ödemeler için /payments/verify kullanılır.",
         )
 
-    if r.is_paid:
+    # ✅ idempotent
+    if r.is_paid and r.payment_ref:
         return _to_schema(r)
 
     r.is_paid = True
@@ -189,22 +222,28 @@ async def mark_paid(reading_id: str, body: MarkPaidRequest, session: Session = D
 # GENERATE
 # ------------------------------------------------
 @router.post("/{reading_id}/generate", response_model=HandReading)
-async def generate(reading_id: str, session: Session = Depends(get_session)):
-    r = _get_or_404(session, reading_id)
+async def generate(
+    reading_id: str,
+    session: Session = Depends(get_session),
+    device_id: str = Depends(get_device_id),
+):
+    r = _get_or_404_owner(session, reading_id, device_id)
 
     photos = list_photos(r)
     if not photos:
         raise HTTPException(status_code=400, detail="El fotoğrafı yüklenmedi.")
 
-    # ✅ ödeme yoksa 402
     if not r.is_paid:
         raise HTTPException(status_code=402, detail="Ödeme yapılmadan yorum oluşturulamaz.")
 
     # idempotent
-    if r.status == "completed" and r.result_text:
+    if (r.status or "").lower().strip() == "completed" and (r.result_text or "").strip():
         return _to_schema(r)
 
-    # 🔒 SON KEZ EL DOĞRULAMA
+    # processing ise tekrar çağırma (kalkan)
+    if (r.status or "").lower().strip() == "processing":
+        return _to_schema(r)
+
     verdict = validate_hand_images(photos)
     if not verdict.get("ok", False):
         raise HTTPException(
@@ -212,31 +251,46 @@ async def generate(reading_id: str, session: Session = Depends(get_session)):
             detail=_hand_upload_user_message(verdict),
         )
 
-    r = set_status(session, reading_id, "processing")
+    set_status(session, reading_id, "processing")
 
-    comment = generate_hand_fortune(
-        name=r.name,
-        topic=r.topic,
-        question=r.question,
-        dominant_hand=r.dominant_hand,
-        photo_hand=r.photo_hand,
-        image_paths=photos,
-    )
+    try:
+        comment = generate_hand_fortune(
+            name=r.name,
+            topic=r.topic,
+            question=r.question,
+            dominant_hand=getattr(r, "dominant_hand", None),
+            photo_hand=getattr(r, "photo_hand", None),
+            image_paths=photos,
+        )
 
-    if not comment or not comment.strip():
-        set_status(session, reading_id, "paid")
-        raise HTTPException(status_code=500, detail="El falı yorumu üretilemedi.")
+        if not comment or not comment.strip():
+            set_status(session, reading_id, "paid")
+            raise HTTPException(status_code=500, detail="El falı yorumu üretilemedi.")
 
-    r = set_status(session, reading_id, "completed", comment=comment)
-    return _to_schema(r)
+        r2 = set_status(session, reading_id, "completed", comment=comment)
+        return _to_schema(r2)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        # tekrar denemeye izin ver
+        try:
+            set_status(session, reading_id, "paid")
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"El falı yorum üretilemedi: {e}")
 
 
 # ------------------------------------------------
 # DETAIL
 # ------------------------------------------------
 @router.get("/{reading_id}", response_model=HandReading)
-async def detail(reading_id: str, session: Session = Depends(get_session)):
-    r = _get_or_404(session, reading_id)
+async def detail(
+    reading_id: str,
+    session: Session = Depends(get_session),
+    device_id: str = Depends(get_device_id),
+):
+    r = _get_or_404_owner(session, reading_id, device_id)
     return _to_schema(r)
 
 
@@ -244,8 +298,13 @@ async def detail(reading_id: str, session: Session = Depends(get_session)):
 # RATE
 # ------------------------------------------------
 @router.post("/{reading_id}/rate", response_model=HandReading)
-async def rate(reading_id: str, req: RatingRequest, session: Session = Depends(get_session)):
-    r = _get_or_404(session, reading_id)
+async def rate(
+    reading_id: str,
+    req: RatingRequest,
+    session: Session = Depends(get_session),
+    device_id: str = Depends(get_device_id),
+):
+    r = _get_or_404_owner(session, reading_id, device_id)
 
     if req.rating < 1 or req.rating > 5:
         raise HTTPException(status_code=400, detail="Puan 1 ile 5 arasında olmalı.")

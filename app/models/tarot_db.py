@@ -11,40 +11,61 @@ from sqlmodel import SQLModel, Field
 class TarotReadingDB(SQLModel, table=True):
     __tablename__ = "tarot_readings"
 
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True, index=True)
+    # ✅ PK
+    id: str = Field(
+        default_factory=lambda: str(uuid.uuid4()),
+        primary_key=True,
+        index=True,
+    )
 
-    # kullanıcı bilgileri
+    # ✅ CİHAZ BAZLI SAHİPLİK (PROFİLİN BEL KEMİĞİ)
+    device_id: Optional[str] = Field(
+        default=None,
+        index=True,
+        description="Mobil cihaz kimliği (X-Device-Id)",
+    )
+
+    # Kullanıcı bilgileri
     name: str = Field(default="Misafir", max_length=80)
     age: Optional[int] = Field(default=None)
 
-    # tarot form
+    # Tarot form
     topic: str = Field(default="", max_length=120)
     question: str = Field(default="", max_length=500)
 
-    # ✅ three/six/twelve (Flutter ile uyumlu)
+    # Açılım tipi: three / six / twelve
     spread_type: str = Field(default="three", max_length=20)
 
-    # ✅ kartlar json string olarak tutulur
-    cards_json: str = Field(default="[]")
+    # Kartlar (json string)
+    cards_json: str = Field(
+        default="[]",
+        description="Seçilen kartların JSON listesi",
+    )
 
-    # ödeme + durum
-    is_paid: bool = Field(default=False)
+    # Ödeme
+    is_paid: bool = Field(default=False, index=True)  # ✅ (opsiyonel) filtreleme hızlanır
     payment_ref: Optional[str] = Field(default=None)
 
-    # ✅ default'u start route ile aynı: ödeme bekliyor
-    # pending_payment/selected/paid/processing/completed
-    status: str = Field(default="pending_payment", max_length=30)
+    # Durum: pending_payment / selected / paid / processing / completed
+    status: str = Field(
+        default="pending_payment",
+        max_length=30,
+        index=True,
+    )
 
-    # çıktı
+    # Çıktı
     result_text: Optional[str] = Field(default=None)
 
-    # puan
+    # Puan
     rating: Optional[int] = Field(default=None)
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    # Zaman
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)  # ✅ (opsiyonel) listelerken hız
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
-    # helpers
+    # --------------------
+    # Helpers
+    # --------------------
     def get_cards(self) -> List[str]:
         try:
             data = json.loads(self.cards_json or "[]")

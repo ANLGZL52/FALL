@@ -11,7 +11,18 @@ class CoffeeReadingDB(SQLModel, table=True):
     __tablename__ = "coffee_readings"
 
     # ✅ PK: default uuid
-    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True, index=True)
+    id: str = Field(
+        default_factory=lambda: str(uuid4()),
+        primary_key=True,
+        index=True,
+    )
+
+    # ✅ Cihaz bazlı sahiplik (profilin TEMELİ)
+    device_id: Optional[str] = Field(
+        default=None,
+        index=True,
+        description="Mobil cihaz kimliği (X-Device-Id)",
+    )
 
     # Kullanıcı inputları
     topic: str = Field(default="Genel", index=True)
@@ -21,11 +32,18 @@ class CoffeeReadingDB(SQLModel, table=True):
     age: Optional[int] = Field(default=None)
 
     # Foto & sonuç
-    images_json: str = Field(default="[]")       # path listesi json string
+    images_json: str = Field(
+        default="[]",
+        description="Yüklenen foto path'lerinin JSON listesi",
+    )
     result_text: Optional[str] = Field(default=None)
 
     # süreç
-    status: str = Field(default="created", index=True)  # created/images_uploaded/paid/done
+    status: str = Field(
+        default="created",
+        index=True,
+        description="created / images_uploaded / paid / done",
+    )
     is_paid: bool = Field(default=False)
     payment_ref: Optional[str] = Field(default=None)
 

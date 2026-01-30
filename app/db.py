@@ -16,6 +16,7 @@ from app.models.birthchart_db import BirthChartReadingDB  # noqa: F401
 from app.models.personality_db import PersonalityReadingDB  # noqa: F401
 from app.models.synastry_db import SynastryReadingDB  # noqa: F401
 from app.models.payment_db import PaymentDB  # noqa: F401
+from app.models.profile_db import UserProfileDB  # noqa: F401
 
 
 def _normalize_database_url(url: str) -> str:
@@ -67,6 +68,9 @@ def init_db() -> None:
 
     if db_url.startswith("sqlite"):
         SQLModel.metadata.create_all(engine)
+
+        # ✅ SQLite migration helper’lar
+        ensure_coffee_schema()
         ensure_hand_schema()
         ensure_tarot_schema()
         ensure_numerology_schema()
@@ -86,7 +90,7 @@ def init_db() -> None:
             conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": LOCK_KEY})
 
 
-# --- SQLITE MIGRATION HELPERS (aynı senin kodun) ---
+# --- SQLITE MIGRATION HELPERS ---
 def _sqlite_has_table(table: str) -> bool:
     if not db_url.startswith("sqlite"):
         return False
@@ -117,6 +121,27 @@ def _sqlite_add_cols(table: str, alters: list[str]) -> None:
     print(f"[DB] {table} altered: {len(alters)} changes applied.")
 
 
+def ensure_coffee_schema() -> None:
+    if not db_url.startswith("sqlite"):
+        return
+    table = "coffee_readings"
+    if not _sqlite_has_table(table):
+        return
+    alters: list[str] = []
+
+    # ✅ ownership
+    if not _sqlite_has_column(table, "device_id"):
+        alters.append("ALTER TABLE coffee_readings ADD COLUMN device_id VARCHAR;")
+
+    # bazı eski db’lerde bu kolonlar eksik olabilir
+    if not _sqlite_has_column(table, "updated_at"):
+        alters.append("ALTER TABLE coffee_readings ADD COLUMN updated_at DATETIME;")
+    if not _sqlite_has_column(table, "created_at"):
+        alters.append("ALTER TABLE coffee_readings ADD COLUMN created_at DATETIME;")
+
+    _sqlite_add_cols(table, alters)
+
+
 def ensure_hand_schema() -> None:
     if not db_url.startswith("sqlite"):
         return
@@ -124,6 +149,11 @@ def ensure_hand_schema() -> None:
     if not _sqlite_has_table(table):
         return
     alters: list[str] = []
+
+    # ✅ ownership
+    if not _sqlite_has_column(table, "device_id"):
+        alters.append("ALTER TABLE hand_readings ADD COLUMN device_id VARCHAR;")
+
     if not _sqlite_has_column(table, "dominant_hand"):
         alters.append("ALTER TABLE hand_readings ADD COLUMN dominant_hand VARCHAR;")
     if not _sqlite_has_column(table, "photo_hand"):
@@ -136,6 +166,7 @@ def ensure_hand_schema() -> None:
         alters.append("ALTER TABLE hand_readings ADD COLUMN updated_at DATETIME;")
     if not _sqlite_has_column(table, "created_at"):
         alters.append("ALTER TABLE hand_readings ADD COLUMN created_at DATETIME;")
+
     _sqlite_add_cols(table, alters)
 
 
@@ -146,6 +177,11 @@ def ensure_tarot_schema() -> None:
     if not _sqlite_has_table(table):
         return
     alters: list[str] = []
+
+    # ✅ ownership
+    if not _sqlite_has_column(table, "device_id"):
+        alters.append("ALTER TABLE tarot_readings ADD COLUMN device_id VARCHAR;")
+
     if not _sqlite_has_column(table, "name"):
         alters.append("ALTER TABLE tarot_readings ADD COLUMN name VARCHAR;")
     if not _sqlite_has_column(table, "age"):
@@ -172,6 +208,7 @@ def ensure_tarot_schema() -> None:
         alters.append("ALTER TABLE tarot_readings ADD COLUMN updated_at DATETIME;")
     if not _sqlite_has_column(table, "created_at"):
         alters.append("ALTER TABLE tarot_readings ADD COLUMN created_at DATETIME;")
+
     _sqlite_add_cols(table, alters)
 
 
@@ -182,6 +219,11 @@ def ensure_numerology_schema() -> None:
     if not _sqlite_has_table(table):
         return
     alters: list[str] = []
+
+    # ✅ ownership
+    if not _sqlite_has_column(table, "device_id"):
+        alters.append("ALTER TABLE numerology_readings ADD COLUMN device_id VARCHAR;")
+
     if not _sqlite_has_column(table, "payment_ref"):
         alters.append("ALTER TABLE numerology_readings ADD COLUMN payment_ref VARCHAR;")
     if not _sqlite_has_column(table, "rating"):
@@ -192,6 +234,7 @@ def ensure_numerology_schema() -> None:
         alters.append("ALTER TABLE numerology_readings ADD COLUMN updated_at DATETIME;")
     if not _sqlite_has_column(table, "created_at"):
         alters.append("ALTER TABLE numerology_readings ADD COLUMN created_at DATETIME;")
+
     _sqlite_add_cols(table, alters)
 
 
@@ -202,8 +245,18 @@ def ensure_birthchart_schema() -> None:
     if not _sqlite_has_table(table):
         return
     alters: list[str] = []
+
+    # ✅ ownership
+    if not _sqlite_has_column(table, "device_id"):
+        alters.append("ALTER TABLE birthchart_readings ADD COLUMN device_id VARCHAR;")
+
     if not _sqlite_has_column(table, "birth_time"):
         alters.append("ALTER TABLE birthchart_readings ADD COLUMN birth_time VARCHAR;")
+    if not _sqlite_has_column(table, "updated_at"):
+        alters.append("ALTER TABLE birthchart_readings ADD COLUMN updated_at DATETIME;")
+    if not _sqlite_has_column(table, "created_at"):
+        alters.append("ALTER TABLE birthchart_readings ADD COLUMN created_at DATETIME;")
+
     _sqlite_add_cols(table, alters)
 
 
@@ -214,6 +267,11 @@ def ensure_personality_schema() -> None:
     if not _sqlite_has_table(table):
         return
     alters: list[str] = []
+
+    # ✅ ownership
+    if not _sqlite_has_column(table, "device_id"):
+        alters.append("ALTER TABLE personality_readings ADD COLUMN device_id VARCHAR;")
+
     if not _sqlite_has_column(table, "payment_ref"):
         alters.append("ALTER TABLE personality_readings ADD COLUMN payment_ref VARCHAR;")
     if not _sqlite_has_column(table, "rating"):
@@ -224,6 +282,7 @@ def ensure_personality_schema() -> None:
         alters.append("ALTER TABLE personality_readings ADD COLUMN updated_at DATETIME;")
     if not _sqlite_has_column(table, "created_at"):
         alters.append("ALTER TABLE personality_readings ADD COLUMN created_at DATETIME;")
+
     _sqlite_add_cols(table, alters)
 
 
@@ -234,6 +293,11 @@ def ensure_synastry_schema() -> None:
     if not _sqlite_has_table(table):
         return
     alters: list[str] = []
+
+    # ✅ ownership
+    if not _sqlite_has_column(table, "device_id"):
+        alters.append("ALTER TABLE synastry_readings ADD COLUMN device_id VARCHAR;")
+
     if not _sqlite_has_column(table, "payment_ref"):
         alters.append("ALTER TABLE synastry_readings ADD COLUMN payment_ref VARCHAR;")
     if not _sqlite_has_column(table, "rating"):
@@ -244,4 +308,5 @@ def ensure_synastry_schema() -> None:
         alters.append("ALTER TABLE synastry_readings ADD COLUMN updated_at DATETIME;")
     if not _sqlite_has_column(table, "created_at"):
         alters.append("ALTER TABLE synastry_readings ADD COLUMN created_at DATETIME;")
+
     _sqlite_add_cols(table, alters)
