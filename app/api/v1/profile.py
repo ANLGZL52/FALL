@@ -9,7 +9,7 @@ from sqlmodel import Session, select, func
 
 from app.core.device import get_device_id
 from app.db import get_session
-from app.repos import profile_repo
+from app.repositories import profile_repo
 from app.schemas.profile import ProfileUpsertRequest, ProfileResponse
 
 # ✅ Reading modelleri (profil summary/history için)
