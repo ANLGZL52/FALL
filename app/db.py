@@ -1,7 +1,7 @@
 # app/db.py
 from __future__ import annotations
 
-from typing import Generator
+from typing import Generator, Dict
 from sqlalchemy import text
 from sqlmodel import SQLModel, Session, create_engine
 
@@ -9,8 +9,8 @@ from app.core.config import settings
 
 # ✅ MODELLERİ IMPORT ET (create_all için şart)
 from app.models.coffee_db import CoffeeReadingDB  # noqa: F401
-from app.models.hand_db import HandReadingDB      # noqa: F401
-from app.models.tarot_db import TarotReadingDB    # noqa: F401
+from app.models.hand_db import HandReadingDB  # noqa: F401
+from app.models.tarot_db import TarotReadingDB  # noqa: F401
 from app.models.numerology_db import NumerologyReadingDB  # noqa: F401
 from app.models.birthchart_db import BirthChartReadingDB  # noqa: F401
 from app.models.personality_db import PersonalityReadingDB  # noqa: F401
@@ -26,6 +26,7 @@ def _normalize_database_url(url: str) -> str:
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://"):]
 
+    # already contains driver (postgresql+psycopg etc.)
     if url.startswith("postgresql+"):
         return url
 
@@ -56,7 +57,7 @@ def get_session() -> Generator[Session, None, None]:
 def init_db() -> None:
     """
     - SQLite: create_all + sqlite migration helper'ları
-    - Postgres: multi-worker race'i advisory lock ile engelle
+    - Postgres: advisory lock + create_all + postgres migration helper'ları
     """
     try:
         if db_url.startswith("sqlite"):
@@ -66,7 +67,7 @@ def init_db() -> None:
     except Exception as e:
         print(f"[DB] Could not read database info: {e}")
 
-    if db_url.startswith("sqlite"):
+    if _is_sqlite():
         SQLModel.metadata.create_all(engine)
 
         # ✅ SQLite migration helper’lar
@@ -77,22 +78,49 @@ def init_db() -> None:
         ensure_birthchart_schema()
         ensure_personality_schema()
         ensure_synastry_schema()
+        ensure_payments_schema()
+        ensure_profile_schema()
         return
 
+    # ✅ Postgres: multi-worker aynı anda ALTER basmasın
     LOCK_KEY = 91520260115
 
     with engine.connect() as conn:
         conn.execute(text("SELECT pg_advisory_lock(:k)"), {"k": LOCK_KEY})
         try:
-            # ✅ create_all engine/conn fark etmeksizin stabil: engine ile
             SQLModel.metadata.create_all(engine)
+
+            # ✅ Postgres migration helper’lar
+            ensure_coffee_schema()
+            ensure_hand_schema()
+            ensure_tarot_schema()
+            ensure_numerology_schema()
+            ensure_birthchart_schema()
+            ensure_personality_schema()
+            ensure_synastry_schema()
+            ensure_payments_schema()
+            ensure_profile_schema()
+
+            # ✅ modelde unique=True var → postgres'te garanti altına al
+            ensure_profile_constraints()
         finally:
             conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": LOCK_KEY})
 
 
-# --- SQLITE MIGRATION HELPERS ---
+# ==========================================================
+# DIALECT HELPERS
+# ==========================================================
+def _is_sqlite() -> bool:
+    return db_url.startswith("sqlite")
+
+
+def _is_postgres() -> bool:
+    return db_url.startswith("postgresql")
+
+
+# ---------------- SQLITE HELPERS ----------------
 def _sqlite_has_table(table: str) -> bool:
-    if not db_url.startswith("sqlite"):
+    if not _is_sqlite():
         return False
     q = text("SELECT name FROM sqlite_master WHERE type='table' AND name=:t;")
     with engine.connect() as conn:
@@ -101,7 +129,7 @@ def _sqlite_has_table(table: str) -> bool:
 
 
 def _sqlite_has_column(table: str, column: str) -> bool:
-    if not db_url.startswith("sqlite"):
+    if not _is_sqlite():
         return False
     q = text(f"PRAGMA table_info({table});")
     with engine.connect() as conn:
@@ -121,192 +149,265 @@ def _sqlite_add_cols(table: str, alters: list[str]) -> None:
     print(f"[DB] {table} altered: {len(alters)} changes applied.")
 
 
+# ---------------- POSTGRES HELPERS ----------------
+def _pg_has_table(table: str) -> bool:
+    if not _is_postgres():
+        return False
+    q = text("""
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema='public' AND table_name=:t
+        LIMIT 1;
+    """)
+    with engine.connect() as conn:
+        row = conn.execute(q, {"t": table}).fetchone()
+    return row is not None
+
+
+def _pg_has_column(table: str, column: str) -> bool:
+    if not _is_postgres():
+        return False
+    q = text("""
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema='public'
+          AND table_name=:t
+          AND column_name=:c
+        LIMIT 1;
+    """)
+    with engine.connect() as conn:
+        row = conn.execute(q, {"t": table, "c": column}).fetchone()
+    return row is not None
+
+
+def _pg_add_cols(table: str, alters: list[str]) -> None:
+    if not alters:
+        print(f"[DB] {table} schema OK.")
+        return
+
+    with engine.begin() as conn:
+        for stmt in alters:
+            conn.execute(text(stmt))
+    print(f"[DB] {table} altered: {len(alters)} changes applied.")
+
+
+def _ensure_columns(table: str, columns: Dict[str, str]) -> None:
+    """
+    columns: {"col_name": "VARCHAR", "created_at": "TIMESTAMP", ...}
+    - SQLite: ALTER TABLE ... ADD COLUMN ... (TIMESTAMP->DATETIME map)
+    - Postgres: ALTER TABLE ... ADD COLUMN IF NOT EXISTS ...
+    """
+    if _is_sqlite():
+        if not _sqlite_has_table(table):
+            return
+        alters: list[str] = []
+        for col, coltype in columns.items():
+            if not _sqlite_has_column(table, col):
+                ct = "DATETIME" if coltype == "TIMESTAMP" else coltype
+                alters.append(f"ALTER TABLE {table} ADD COLUMN {col} {ct};")
+        _sqlite_add_cols(table, alters)
+        return
+
+    if _is_postgres():
+        if not _pg_has_table(table):
+            return
+        alters: list[str] = []
+        for col, coltype in columns.items():
+            if not _pg_has_column(table, col):
+                alters.append(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {coltype};")
+        _pg_add_cols(table, alters)
+        return
+
+
+# ==========================================================
+# SCHEMA ENSURE (ALL TABLES)
+# ==========================================================
 def ensure_coffee_schema() -> None:
-    if not db_url.startswith("sqlite"):
-        return
-    table = "coffee_readings"
-    if not _sqlite_has_table(table):
-        return
-    alters: list[str] = []
-
-    # ✅ ownership
-    if not _sqlite_has_column(table, "device_id"):
-        alters.append("ALTER TABLE coffee_readings ADD COLUMN device_id VARCHAR;")
-
-    # bazı eski db’lerde bu kolonlar eksik olabilir
-    if not _sqlite_has_column(table, "updated_at"):
-        alters.append("ALTER TABLE coffee_readings ADD COLUMN updated_at DATETIME;")
-    if not _sqlite_has_column(table, "created_at"):
-        alters.append("ALTER TABLE coffee_readings ADD COLUMN created_at DATETIME;")
-
-    _sqlite_add_cols(table, alters)
+    _ensure_columns("coffee_readings", {
+        "device_id": "VARCHAR",
+        "created_at": "TIMESTAMP",
+        "updated_at": "TIMESTAMP",
+        "is_paid": "BOOLEAN",
+        "payment_ref": "VARCHAR",
+        "status": "VARCHAR",
+        "result_text": "VARCHAR",
+        "rating": "INTEGER",
+        "images_json": "VARCHAR",
+        "name": "VARCHAR",
+        "age": "INTEGER",
+        "topic": "VARCHAR",
+        "question": "VARCHAR",
+    })
 
 
 def ensure_hand_schema() -> None:
-    if not db_url.startswith("sqlite"):
-        return
-    table = "hand_readings"
-    if not _sqlite_has_table(table):
-        return
-    alters: list[str] = []
-
-    # ✅ ownership
-    if not _sqlite_has_column(table, "device_id"):
-        alters.append("ALTER TABLE hand_readings ADD COLUMN device_id VARCHAR;")
-
-    if not _sqlite_has_column(table, "dominant_hand"):
-        alters.append("ALTER TABLE hand_readings ADD COLUMN dominant_hand VARCHAR;")
-    if not _sqlite_has_column(table, "photo_hand"):
-        alters.append("ALTER TABLE hand_readings ADD COLUMN photo_hand VARCHAR;")
-    if not _sqlite_has_column(table, "relationship_status"):
-        alters.append("ALTER TABLE hand_readings ADD COLUMN relationship_status VARCHAR;")
-    if not _sqlite_has_column(table, "big_decision"):
-        alters.append("ALTER TABLE hand_readings ADD COLUMN big_decision VARCHAR;")
-    if not _sqlite_has_column(table, "updated_at"):
-        alters.append("ALTER TABLE hand_readings ADD COLUMN updated_at DATETIME;")
-    if not _sqlite_has_column(table, "created_at"):
-        alters.append("ALTER TABLE hand_readings ADD COLUMN created_at DATETIME;")
-
-    _sqlite_add_cols(table, alters)
+    _ensure_columns("hand_readings", {
+        "device_id": "VARCHAR",
+        "dominant_hand": "VARCHAR",
+        "photo_hand": "VARCHAR",
+        "relationship_status": "VARCHAR",
+        "big_decision": "VARCHAR",
+        "created_at": "TIMESTAMP",
+        "updated_at": "TIMESTAMP",
+        "is_paid": "BOOLEAN",
+        "payment_ref": "VARCHAR",
+        "status": "VARCHAR",
+        "result_text": "VARCHAR",
+        "rating": "INTEGER",
+        "images_json": "VARCHAR",
+        "name": "VARCHAR",
+        "age": "INTEGER",
+        "topic": "VARCHAR",
+        "question": "VARCHAR",
+    })
 
 
 def ensure_tarot_schema() -> None:
-    if not db_url.startswith("sqlite"):
-        return
-    table = "tarot_readings"
-    if not _sqlite_has_table(table):
-        return
-    alters: list[str] = []
-
-    # ✅ ownership
-    if not _sqlite_has_column(table, "device_id"):
-        alters.append("ALTER TABLE tarot_readings ADD COLUMN device_id VARCHAR;")
-
-    if not _sqlite_has_column(table, "name"):
-        alters.append("ALTER TABLE tarot_readings ADD COLUMN name VARCHAR;")
-    if not _sqlite_has_column(table, "age"):
-        alters.append("ALTER TABLE tarot_readings ADD COLUMN age INTEGER;")
-    if not _sqlite_has_column(table, "topic"):
-        alters.append("ALTER TABLE tarot_readings ADD COLUMN topic VARCHAR;")
-    if not _sqlite_has_column(table, "question"):
-        alters.append("ALTER TABLE tarot_readings ADD COLUMN question VARCHAR;")
-    if not _sqlite_has_column(table, "spread_type"):
-        alters.append("ALTER TABLE tarot_readings ADD COLUMN spread_type VARCHAR;")
-    if not _sqlite_has_column(table, "cards_json"):
-        alters.append("ALTER TABLE tarot_readings ADD COLUMN cards_json VARCHAR;")
-    if not _sqlite_has_column(table, "is_paid"):
-        alters.append("ALTER TABLE tarot_readings ADD COLUMN is_paid BOOLEAN;")
-    if not _sqlite_has_column(table, "payment_ref"):
-        alters.append("ALTER TABLE tarot_readings ADD COLUMN payment_ref VARCHAR;")
-    if not _sqlite_has_column(table, "status"):
-        alters.append("ALTER TABLE tarot_readings ADD COLUMN status VARCHAR;")
-    if not _sqlite_has_column(table, "result_text"):
-        alters.append("ALTER TABLE tarot_readings ADD COLUMN result_text VARCHAR;")
-    if not _sqlite_has_column(table, "rating"):
-        alters.append("ALTER TABLE tarot_readings ADD COLUMN rating INTEGER;")
-    if not _sqlite_has_column(table, "updated_at"):
-        alters.append("ALTER TABLE tarot_readings ADD COLUMN updated_at DATETIME;")
-    if not _sqlite_has_column(table, "created_at"):
-        alters.append("ALTER TABLE tarot_readings ADD COLUMN created_at DATETIME;")
-
-    _sqlite_add_cols(table, alters)
+    _ensure_columns("tarot_readings", {
+        "device_id": "VARCHAR",
+        "name": "VARCHAR",
+        "age": "INTEGER",
+        "topic": "VARCHAR",
+        "question": "VARCHAR",
+        "spread_type": "VARCHAR",
+        "cards_json": "VARCHAR",
+        "is_paid": "BOOLEAN",
+        "payment_ref": "VARCHAR",
+        "status": "VARCHAR",
+        "result_text": "VARCHAR",
+        "rating": "INTEGER",
+        "created_at": "TIMESTAMP",
+        "updated_at": "TIMESTAMP",
+    })
 
 
 def ensure_numerology_schema() -> None:
-    if not db_url.startswith("sqlite"):
-        return
-    table = "numerology_readings"
-    if not _sqlite_has_table(table):
-        return
-    alters: list[str] = []
-
-    # ✅ ownership
-    if not _sqlite_has_column(table, "device_id"):
-        alters.append("ALTER TABLE numerology_readings ADD COLUMN device_id VARCHAR;")
-
-    if not _sqlite_has_column(table, "payment_ref"):
-        alters.append("ALTER TABLE numerology_readings ADD COLUMN payment_ref VARCHAR;")
-    if not _sqlite_has_column(table, "rating"):
-        alters.append("ALTER TABLE numerology_readings ADD COLUMN rating INTEGER;")
-    if not _sqlite_has_column(table, "result_text"):
-        alters.append("ALTER TABLE numerology_readings ADD COLUMN result_text VARCHAR;")
-    if not _sqlite_has_column(table, "updated_at"):
-        alters.append("ALTER TABLE numerology_readings ADD COLUMN updated_at DATETIME;")
-    if not _sqlite_has_column(table, "created_at"):
-        alters.append("ALTER TABLE numerology_readings ADD COLUMN created_at DATETIME;")
-
-    _sqlite_add_cols(table, alters)
+    _ensure_columns("numerology_readings", {
+        "device_id": "VARCHAR",
+        "payment_ref": "VARCHAR",
+        "rating": "INTEGER",
+        "result_text": "VARCHAR",
+        "created_at": "TIMESTAMP",
+        "updated_at": "TIMESTAMP",
+        "status": "VARCHAR",
+        "question": "VARCHAR",
+        "name": "VARCHAR",
+        "birth_date": "VARCHAR",
+    })
 
 
 def ensure_birthchart_schema() -> None:
-    if not db_url.startswith("sqlite"):
-        return
-    table = "birthchart_readings"
-    if not _sqlite_has_table(table):
-        return
-    alters: list[str] = []
-
-    # ✅ ownership
-    if not _sqlite_has_column(table, "device_id"):
-        alters.append("ALTER TABLE birthchart_readings ADD COLUMN device_id VARCHAR;")
-
-    if not _sqlite_has_column(table, "birth_time"):
-        alters.append("ALTER TABLE birthchart_readings ADD COLUMN birth_time VARCHAR;")
-    if not _sqlite_has_column(table, "updated_at"):
-        alters.append("ALTER TABLE birthchart_readings ADD COLUMN updated_at DATETIME;")
-    if not _sqlite_has_column(table, "created_at"):
-        alters.append("ALTER TABLE birthchart_readings ADD COLUMN created_at DATETIME;")
-
-    _sqlite_add_cols(table, alters)
+    _ensure_columns("birthchart_readings", {
+        "device_id": "VARCHAR",
+        "birth_time": "VARCHAR",
+        "payment_ref": "VARCHAR",
+        "rating": "INTEGER",
+        "result_text": "VARCHAR",
+        "created_at": "TIMESTAMP",
+        "updated_at": "TIMESTAMP",
+        "status": "VARCHAR",
+        "question": "VARCHAR",
+        "name": "VARCHAR",
+        "birth_date": "VARCHAR",
+        "birth_place": "VARCHAR",
+    })
 
 
 def ensure_personality_schema() -> None:
-    if not db_url.startswith("sqlite"):
-        return
-    table = "personality_readings"
-    if not _sqlite_has_table(table):
-        return
-    alters: list[str] = []
-
-    # ✅ ownership
-    if not _sqlite_has_column(table, "device_id"):
-        alters.append("ALTER TABLE personality_readings ADD COLUMN device_id VARCHAR;")
-
-    if not _sqlite_has_column(table, "payment_ref"):
-        alters.append("ALTER TABLE personality_readings ADD COLUMN payment_ref VARCHAR;")
-    if not _sqlite_has_column(table, "rating"):
-        alters.append("ALTER TABLE personality_readings ADD COLUMN rating INTEGER;")
-    if not _sqlite_has_column(table, "result_text"):
-        alters.append("ALTER TABLE personality_readings ADD COLUMN result_text VARCHAR;")
-    if not _sqlite_has_column(table, "updated_at"):
-        alters.append("ALTER TABLE personality_readings ADD COLUMN updated_at DATETIME;")
-    if not _sqlite_has_column(table, "created_at"):
-        alters.append("ALTER TABLE personality_readings ADD COLUMN created_at DATETIME;")
-
-    _sqlite_add_cols(table, alters)
+    _ensure_columns("personality_readings", {
+        "device_id": "VARCHAR",
+        "payment_ref": "VARCHAR",
+        "rating": "INTEGER",
+        "result_text": "VARCHAR",
+        "created_at": "TIMESTAMP",
+        "updated_at": "TIMESTAMP",
+        "status": "VARCHAR",
+        "question": "VARCHAR",
+        "name": "VARCHAR",
+        "birth_date": "VARCHAR",
+        "birth_time": "VARCHAR",
+    })
 
 
 def ensure_synastry_schema() -> None:
-    if not db_url.startswith("sqlite"):
+    # ✅ MODELE %100 UYUMLU: SynastryReadingDB
+    _ensure_columns("synastry_readings", {
+        "device_id": "VARCHAR",
+
+        "name_a": "VARCHAR",
+        "birth_date_a": "VARCHAR",
+        "birth_time_a": "VARCHAR",
+        "birth_city_a": "VARCHAR",
+        "birth_country_a": "VARCHAR",
+
+        "name_b": "VARCHAR",
+        "birth_date_b": "VARCHAR",
+        "birth_time_b": "VARCHAR",
+        "birth_city_b": "VARCHAR",
+        "birth_country_b": "VARCHAR",
+
+        "topic": "VARCHAR",
+        "question": "VARCHAR",
+
+        "is_paid": "BOOLEAN",
+        "payment_ref": "VARCHAR",
+
+        "status": "VARCHAR",
+        "result_text": "VARCHAR",
+        "rating": "INTEGER",
+
+        "created_at": "TIMESTAMP",
+        "updated_at": "TIMESTAMP",
+    })
+
+
+def ensure_payments_schema() -> None:
+    _ensure_columns("payments", {
+        "device_id": "VARCHAR",
+        "reading_id": "VARCHAR",
+        "product": "VARCHAR",
+        "sku": "VARCHAR",
+        "amount": "DOUBLE PRECISION",
+        "currency": "VARCHAR",
+        "status": "VARCHAR",
+        "platform": "VARCHAR",
+        "transaction_id": "VARCHAR",
+        "purchase_token": "VARCHAR",
+        "receipt_data": "VARCHAR",
+        "created_at": "TIMESTAMP",
+        "verified_at": "TIMESTAMP",
+    })
+
+
+def ensure_profile_schema() -> None:
+    # ✅ MODELE %100 UYUMLU: UserProfileDB
+    _ensure_columns("user_profiles", {
+        "device_id": "VARCHAR",
+        "display_name": "VARCHAR",
+        "birth_date": "VARCHAR",
+        "birth_place": "VARCHAR",
+        "birth_time": "VARCHAR",
+        "created_at": "TIMESTAMP",
+        "updated_at": "TIMESTAMP",
+    })
+
+
+def ensure_profile_constraints() -> None:
+    """
+    UserProfileDB: device_id unique=True
+    - SQLModel bazen unique constraint'i create_all ile ekler, bazen eski DB'de yoktur.
+    - Postgres'te unique index ile garantiye alıyoruz.
+    """
+    if not _is_postgres():
         return
-    table = "synastry_readings"
-    if not _sqlite_has_table(table):
+
+    # tablo yoksa zaten create_all oluşturur; yoksa da safe davranır
+    if not _pg_has_table("user_profiles"):
         return
-    alters: list[str] = []
 
-    # ✅ ownership
-    if not _sqlite_has_column(table, "device_id"):
-        alters.append("ALTER TABLE synastry_readings ADD COLUMN device_id VARCHAR;")
-
-    if not _sqlite_has_column(table, "payment_ref"):
-        alters.append("ALTER TABLE synastry_readings ADD COLUMN payment_ref VARCHAR;")
-    if not _sqlite_has_column(table, "rating"):
-        alters.append("ALTER TABLE synastry_readings ADD COLUMN rating INTEGER;")
-    if not _sqlite_has_column(table, "result_text"):
-        alters.append("ALTER TABLE synastry_readings ADD COLUMN result_text VARCHAR;")
-    if not _sqlite_has_column(table, "updated_at"):
-        alters.append("ALTER TABLE synastry_readings ADD COLUMN updated_at DATETIME;")
-    if not _sqlite_has_column(table, "created_at"):
-        alters.append("ALTER TABLE synastry_readings ADD COLUMN created_at DATETIME;")
-
-    _sqlite_add_cols(table, alters)
+    # device_id unique index
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_user_profiles_device_id
+            ON user_profiles (device_id);
+        """))
