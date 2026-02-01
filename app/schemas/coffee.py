@@ -1,7 +1,11 @@
 # app/schemas/coffee.py
-from pydantic import BaseModel, Field
-from typing import Optional, List, Literal
+from __future__ import annotations
+
 from datetime import datetime
+from typing import List, Optional, Literal
+
+from pydantic import BaseModel, Field
+
 
 CoffeeStatus = Literal[
     "pending_payment",
@@ -11,11 +15,17 @@ CoffeeStatus = Literal[
     "completed",
 ]
 
+
 class CoffeeStartRequest(BaseModel):
-    topic: str
-    question: str
-    name: str
+    topic: str = Field(default="Genel", max_length=80)
+    question: str = Field(default="", max_length=700)
+    name: str = Field(default="Misafir", max_length=80)
     age: Optional[int] = None
+
+    # opsiyoneller (şimdilik backend DB’de tutmuyorsan sorun değil, request ile gelir)
+    relationship_status: Optional[str] = None
+    big_decision: Optional[str] = None
+
 
 class CoffeeReading(BaseModel):
     id: str
@@ -25,14 +35,13 @@ class CoffeeReading(BaseModel):
     age: Optional[int] = None
 
     photos: List[str] = Field(default_factory=list)
-    status: CoffeeStatus = "pending_payment"
 
-    # ✅ ana alan
+    status: CoffeeStatus
     comment: Optional[str] = None
-    # ✅ alias (DB'deki isim)
     result_text: Optional[str] = None
 
     rating: Optional[int] = None
+
     is_paid: bool = False
     payment_ref: Optional[str] = None
 

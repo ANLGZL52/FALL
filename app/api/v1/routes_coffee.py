@@ -1,6 +1,7 @@
 # app/api/v1/routes_coffee.py
 from __future__ import annotations
 
+import os
 from typing import List, Optional
 from datetime import datetime
 
@@ -20,7 +21,7 @@ from app.repositories.coffee_repo import (
     list_photos,
     set_status,
 )
-from app.services.storage import save_uploads, resolve_stable_path
+from app.services.storage import save_uploads
 from app.services.openai_service import generate_fortune, validate_coffee_images
 from app.schemas.coffee import CoffeeStartRequest, CoffeeReading
 
@@ -37,8 +38,7 @@ class RatingRequest(BaseModel):
 
 def _get_or_404_owner(session: Session, reading_id: str, device_id: str) -> CoffeeReadingDB:
     """
-    Ownership check: sadece aynı cihaz bu reading'e erişebilir.
-    Legacy kayıtlar için device_id boşsa, ilk erişimde bağlanır.
+    ✅ Ownership check: sadece aynı cihaz bu reading'e erişebilir.
     """
     r = get_reading(session, reading_id)
     if not r:
@@ -46,9 +46,11 @@ def _get_or_404_owner(session: Session, reading_id: str, device_id: str) -> Coff
 
     rid = (getattr(r, "device_id", None) or "").strip()
 
+    # Eğer kayıt device_id ile kilitliyse ve farklı cihazsa => 404
     if rid and rid != device_id:
         raise HTTPException(status_code=404, detail="Reading not found")
 
+    # Legacy: device_id boşsa ilk erişimde bağla
     if not rid:
         try:
             setattr(r, "device_id", device_id)
@@ -71,7 +73,7 @@ def _to_schema(r: CoffeeReadingDB) -> CoffeeReading:
         name=r.name,
         age=r.age,
         photos=photos,
-        status=r.status,
+        status=r.status,                 # ✅ schema ile uyumlu olmak zorunda
         comment=result,
         result_text=result,
         rating=r.rating,
@@ -81,16 +83,11 @@ def _to_schema(r: CoffeeReadingDB) -> CoffeeReading:
     )
 
 
-def _disk_paths(stable_paths: List[str]) -> List[str]:
-    return [str(resolve_stable_path(p)) for p in (stable_paths or [])]
-
-
-def _delete_uploaded(stable_paths: List[str]) -> None:
-    for sp in stable_paths or []:
+def _delete_paths(paths: List[str]) -> None:
+    for p in paths:
         try:
-            p = resolve_stable_path(sp)
-            if p.exists():
-                p.unlink()
+            if os.path.exists(p):
+                os.remove(p)
         except Exception:
             pass
 
@@ -103,10 +100,10 @@ async def start(
 ):
     """
     Akış:
-      1) /coffee/start -> reading_id (pending_payment)
-      2) /coffee/{id}/upload-images -> foto yükle (images_uploaded)
+      1) /coffee/start -> reading (pending_payment)
+      2) /coffee/{id}/upload-images -> foto yükle (photos_uploaded)
       3) Store ödeme -> /payments/intent + /payments/verify (paid)
-      4) /coffee/{id}/generate -> yorum üret (processing -> done)
+      4) /coffee/{id}/generate -> yorum üret (processing -> completed)
     """
     db_obj = CoffeeReadingDB(
         topic=req.topic,
@@ -120,8 +117,13 @@ async def start(
         images_json="[]",
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
-        device_id=device_id,
     )
+
+    try:
+        setattr(db_obj, "device_id", device_id)
+    except Exception:
+        pass
+
     db_obj = create_reading(session, db_obj)
     return _to_schema(db_obj)
 
@@ -136,38 +138,26 @@ async def upload_images(
 ):
     _get_or_404_owner(session, reading_id, device_id)
 
-    # 3-5 foto kuralı
     if len(files) < settings.min_photos or len(files) > settings.max_photos:
         raise HTTPException(
             status_code=400,
             detail=f"Foto sayısı {settings.min_photos}-{settings.max_photos} aralığında olmalı.",
         )
 
-    # 1) Kaydet (DB'ye yazılacak stable path listesi gelir)
-    saved_stable = await save_uploads(reading_id, files)
+    saved = await save_uploads(reading_id, files)
 
-    # 2) Validate (kahve dışı görsel varsa burada patlat)
-    try:
-        verdict = validate_coffee_images(_disk_paths(saved_stable))
-    except Exception as e:
-        _delete_uploaded(saved_stable)
-        raise HTTPException(status_code=500, detail=f"Görsel doğrulama hatası: {e}")
-
+    # ✅ Kahve fincan içi değilse: ödeme adımına geçmesin
+    verdict = validate_coffee_images(saved)
     if not verdict.get("ok", False):
-        _delete_uploaded(saved_stable)
-        # ✅ İSTEDİĞİN net mesaj:
+        _delete_paths(saved)
         raise HTTPException(
             status_code=400,
             detail="Lütfen yalnızca kahve fincanının iç kısmının fotoğrafını yükleyiniz.",
         )
 
-    # 3) DB’ye stable path yaz + status images_uploaded
-    try:
-        r2 = set_photos(session, reading_id, saved_stable)
-        return _to_schema(r2)
-    except Exception as e:
-        _delete_uploaded(saved_stable)
-        raise HTTPException(status_code=500, detail=f"Foto kaydı başarısız: {e}")
+    # ✅ repo status'u photos_uploaded yapıyor
+    r2 = set_photos(session, reading_id, saved)
+    return _to_schema(r2)
 
 
 @router.post("/{reading_id}/mark-paid", response_model=CoffeeReading)
@@ -178,7 +168,7 @@ async def mark_paid(
     device_id: str = Depends(get_device_id),
 ):
     """
-    Legacy/mock akış (TEST-...).
+    ✅ Legacy/mock akış (TEST-...).
     Real ödeme: /payments/verify.
     """
     r = _get_or_404_owner(session, reading_id, device_id)
@@ -214,15 +204,15 @@ async def generate(
 ):
     r = _get_or_404_owner(session, reading_id, device_id)
 
-    photos_stable = list_photos(r)
-    if not photos_stable:
+    photos = list_photos(r)
+    if not photos:
         raise HTTPException(status_code=400, detail="No photos uploaded")
 
     if not r.is_paid:
         raise HTTPException(status_code=402, detail="Payment Required")
 
     status = (r.status or "").lower().strip()
-    result_text = (r.result_text or "").strip()
+    result_text = (getattr(r, "result_text", None) or "").strip()
 
     if result_text:
         return _to_schema(r)
@@ -230,9 +220,8 @@ async def generate(
     if status == "processing":
         return _to_schema(r)
 
-    photos_disk = _disk_paths(photos_stable)
-
-    verdict = validate_coffee_images(photos_disk)
+    # ✅ generate öncesi de doğrula (ek güvenlik)
+    verdict = validate_coffee_images(photos)
     if not verdict.get("ok", False):
         raise HTTPException(
             status_code=400,
@@ -246,11 +235,10 @@ async def generate(
             name=r.name,
             topic=r.topic,
             question=r.question,
-            image_paths=photos_disk,
+            image_paths=photos,
         )
         comment = (comment or "").strip()
 
-        # Model bazen bu cümleyi döndürür -> yine 400
         if comment == "Görseller kahve fincanı içi görünmüyor.":
             set_status(session, reading_id, "paid", comment=None)
             raise HTTPException(
@@ -262,7 +250,7 @@ async def generate(
             set_status(session, reading_id, "paid", comment=None)
             raise HTTPException(status_code=500, detail="Yorum üretilemedi (boş sonuç).")
 
-        r2 = set_status(session, reading_id, "done", comment=comment)
+        r2 = set_status(session, reading_id, "completed", comment=comment)
         return _to_schema(r2)
 
     except HTTPException:

@@ -23,7 +23,6 @@ def _list_from_json(s: str) -> List[str]:
 
 
 def get_reading(session: Session, reading_id: str) -> Optional[CoffeeReadingDB]:
-    # ✅ PK üzerinden
     return session.get(CoffeeReadingDB, reading_id)
 
 
@@ -43,7 +42,6 @@ def update_reading(session: Session, r: CoffeeReadingDB) -> CoffeeReadingDB:
 
 
 def _get_images_json_field(r: CoffeeReadingDB) -> str:
-    # eski db uyumu için
     if hasattr(r, "images_json"):
         return getattr(r, "images_json") or "[]"
     if hasattr(r, "photos_json"):
@@ -68,8 +66,8 @@ def set_photos(session: Session, reading_id: str, photos: List[str]) -> CoffeeRe
 
     _set_images_json_field(r, _list_to_json(photos))
 
-    # ✅ model ile uyumlu status
-    r.status = "images_uploaded"
+    # ✅ MOBİL SCHEMA İLE UYUMLU
+    r.status = "photos_uploaded"
     return update_reading(session, r)
 
 
@@ -91,7 +89,6 @@ def set_status(
     r.status = status
 
     if comment is not None:
-        # coffee modelinde result_text var
         if hasattr(r, "result_text"):
             r.result_text = comment
         elif hasattr(r, "comment"):

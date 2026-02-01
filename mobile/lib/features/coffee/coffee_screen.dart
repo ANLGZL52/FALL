@@ -4,7 +4,8 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../models/coffee_reading.dart';
 import '../../services/coffee_api.dart';
-import '../../services/device_id_service.dart'; // ✅ EKLENDİ
+import '../../services/device_id_service.dart';
+
 import '../../widgets/glass_card.dart';
 import '../../widgets/gradient_button.dart';
 import '../../widgets/mystic_scaffold.dart';
@@ -72,7 +73,7 @@ class _CoffeeScreenState extends State<CoffeeScreen> {
     setState(() => _loading = true);
 
     try {
-      // ✅ TEK KERE deviceId al (start + upload aynı id ile gitsin)
+      // ✅ KRİTİK: Start + Upload için device id gönder
       final deviceId = await DeviceIdService.getOrCreate();
 
       final CoffeeReading reading = await CoffeeApi.start(
@@ -80,13 +81,14 @@ class _CoffeeScreenState extends State<CoffeeScreen> {
         age: int.tryParse(_ageController.text.trim()),
         topic: _topicController.text.trim(),
         question: _questionController.text.trim(),
-        deviceId: deviceId, // ✅ EKLENDİ
+        deviceId: deviceId,
       );
 
+      // ✅ upload da deviceId ile
       await CoffeeApi.uploadPhotos(
         readingId: reading.id,
         imageFiles: _photos,
-        deviceId: deviceId, // ✅ EKLENDİ
+        deviceId: deviceId,
       );
 
       if (!mounted) return;
