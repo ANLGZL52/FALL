@@ -1,4 +1,3 @@
-# app/repositories/synastry_repo.py
 from __future__ import annotations
 
 from datetime import datetime
@@ -14,7 +13,6 @@ class SynastryRepo:
         self,
         *,
         session: Session,
-        reading_id: str,
         device_id: Optional[str],
         name_a: str,
         birth_date_a: str,
@@ -29,12 +27,8 @@ class SynastryRepo:
         topic: str,
         question: Optional[str],
     ) -> Dict[str, Any]:
-        """
-        reading_id: dış dünyaya döndüğümüz id (uuid string) -> DB'de SynastryReadingDB.id
-        """
         row = SynastryReadingDB(
-            id=reading_id,              # ✅ reading_id -> id
-            device_id=device_id,        # ✅ profil sahipliği
+            device_id=device_id,
 
             name_a=name_a or "",
             birth_date_a=birth_date_a or "",
@@ -53,6 +47,9 @@ class SynastryRepo:
 
             status="started",
             is_paid=False,
+            payment_ref=None,
+            result_text=None,
+            rating=None,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
         )
@@ -63,12 +60,12 @@ class SynastryRepo:
         return row.model_dump()
 
     def get(self, *, session: Session, reading_id: str) -> Optional[Dict[str, Any]]:
-        stmt = select(SynastryReadingDB).where(SynastryReadingDB.id == reading_id)  # ✅ id
+        stmt = select(SynastryReadingDB).where(SynastryReadingDB.id == reading_id)
         row = session.exec(stmt).first()
         return row.model_dump() if row else None
 
     def _get_row(self, *, session: Session, reading_id: str) -> Optional[SynastryReadingDB]:
-        stmt = select(SynastryReadingDB).where(SynastryReadingDB.id == reading_id)  # ✅ id
+        stmt = select(SynastryReadingDB).where(SynastryReadingDB.id == reading_id)
         return session.exec(stmt).first()
 
     def mark_paid(
@@ -82,7 +79,6 @@ class SynastryRepo:
         if not row:
             return None
 
-        # ✅ idempotent
         row.is_paid = True
         row.payment_ref = payment_ref
         row.status = "paid"
@@ -95,19 +91,16 @@ class SynastryRepo:
 
     def claim_processing(self, *, session: Session, reading_id: str) -> Tuple[Optional[Dict[str, Any]], bool]:
         """
-        ✅ Generate için kilit:
-        - DONE ise: claimed=False
-        - PROCESSING ise: claimed=False
-        - PAID ise: status=PROCESSING + claimed=True
-        - ödeme yoksa: claimed=False (route 402 verir)
+        - result_text varsa: done'a çek, claimed=False
+        - status=processing ise: claimed=False
+        - is_paid ise: processing'e çek, claimed=True
         """
         row = self._get_row(session=session, reading_id=reading_id)
         if not row:
             return None, False
 
-        # sonuç varsa tekrar üretme
         if (row.result_text or "").strip():
-            if row.status != "done":
+            if (row.status or "").lower().strip() != "done":
                 row.status = "done"
                 row.updated_at = datetime.utcnow()
                 session.add(row)
@@ -116,11 +109,10 @@ class SynastryRepo:
             return row.model_dump(), False
 
         st = (row.status or "").lower().strip()
-
         if st == "processing":
             return row.model_dump(), False
 
-        if row.is_paid and st in ("paid", "started", ""):
+        if row.is_paid:
             row.status = "processing"
             row.updated_at = datetime.utcnow()
             session.add(row)

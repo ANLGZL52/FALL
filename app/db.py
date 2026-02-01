@@ -1,10 +1,8 @@
-# app/db.py
 from __future__ import annotations
 
 from typing import Generator, Dict, Optional
 
 from sqlalchemy import text
-from sqlalchemy.exc import ProgrammingError
 from sqlmodel import SQLModel, Session, create_engine
 
 from app.core.config import settings
@@ -203,49 +201,98 @@ def ensure_id_varchar(table: str) -> None:
     if not _pg_has_column(table, "id"):
         return
 
-    dtype = _pg_column_type(table, "id")  # 'integer', 'bigint', ...
+    dtype = _pg_column_type(table, "id")
     if dtype in ("integer", "bigint"):
         print(f"[DB] {table}.id is {dtype} -> converting to VARCHAR...")
 
         with engine.begin() as conn:
-            # 1) IDENTITY varsa düşür (Postgres 10+)
+            # 1) IDENTITY varsa düşür
             try:
-                conn.execute(
-                    text(
-                        f"""
-                        ALTER TABLE {table}
-                          ALTER COLUMN id DROP IDENTITY IF EXISTS;
-                        """
-                    )
-                )
+                conn.execute(text(f"""
+                    ALTER TABLE {table}
+                      ALTER COLUMN id DROP IDENTITY IF EXISTS;
+                """))
             except Exception:
                 pass
 
             # 2) SERIAL default/nextval varsa düşür
             try:
-                conn.execute(
-                    text(
-                        f"""
-                        ALTER TABLE {table}
-                          ALTER COLUMN id DROP DEFAULT;
-                        """
-                    )
-                )
+                conn.execute(text(f"""
+                    ALTER TABLE {table}
+                      ALTER COLUMN id DROP DEFAULT;
+                """))
             except Exception:
                 pass
 
             # 3) Type değiştir
-            conn.execute(
-                text(
-                    f"""
-                    ALTER TABLE {table}
-                      ALTER COLUMN id TYPE VARCHAR
-                      USING id::text;
-                    """
-                )
-            )
+            conn.execute(text(f"""
+                ALTER TABLE {table}
+                  ALTER COLUMN id TYPE VARCHAR
+                  USING id::text;
+            """))
 
         print(f"[DB] {table}.id converted to VARCHAR.")
+
+
+# ==========================================================
+# ✅ FIX: legacy synastry_readings.reading_id NOT NULL
+# ==========================================================
+def ensure_fix_legacy_synastry_reading_id() -> None:
+    """
+    Eski DB'lerde synastry_readings tablosunda 'reading_id' kolonu kalmış olabiliyor.
+    NOT NULL ise INSERT patlar (senin aldığın hata).
+
+    En iyi çözüm: DROP COLUMN (artık kullanılmıyor).
+    DROP olmazsa: NOT NULL kaldır (nullable yap).
+    """
+    if not _is_postgres():
+        return
+    if not _pg_has_table("synastry_readings"):
+        return
+    if not _pg_has_column("synastry_readings", "reading_id"):
+        return
+
+    print("[DB] legacy synastry_readings.reading_id detected -> fixing...")
+
+    # 1) Önce DROP dene (temiz çözüm)
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                ALTER TABLE synastry_readings
+                DROP COLUMN IF EXISTS reading_id;
+            """))
+        print("[DB] synastry_readings.reading_id dropped.")
+        return
+    except Exception as e:
+        print(f"[DB] DROP reading_id failed, fallback to nullable. reason={e}")
+
+    # 2) DROP olmadıysa: nullable yap
+    with engine.begin() as conn:
+        try:
+            conn.execute(text("""
+                ALTER TABLE synastry_readings
+                  ALTER COLUMN reading_id DROP DEFAULT;
+            """))
+        except Exception:
+            pass
+
+        try:
+            conn.execute(text("""
+                ALTER TABLE synastry_readings
+                  ALTER COLUMN reading_id DROP IDENTITY IF EXISTS;
+            """))
+        except Exception:
+            pass
+
+        try:
+            conn.execute(text("""
+                ALTER TABLE synastry_readings
+                  ALTER COLUMN reading_id DROP NOT NULL;
+            """))
+        except Exception:
+            pass
+
+    print("[DB] synastry_readings.reading_id is now nullable (fallback).")
 
 
 # ==========================================================
@@ -453,14 +500,10 @@ def ensure_profile_constraints() -> None:
         return
 
     with engine.begin() as conn:
-        conn.execute(
-            text(
-                """
-                CREATE UNIQUE INDEX IF NOT EXISTS ux_user_profiles_device_id
-                ON user_profiles (device_id);
-                """
-            )
-        )
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_user_profiles_device_id
+            ON user_profiles (device_id);
+        """))
 
 
 def init_db() -> None:
@@ -510,6 +553,9 @@ def init_db() -> None:
                 "personality_readings",
             ):
                 ensure_id_varchar(t)
+
+            # ✅ 1.5) synastry legacy reading_id fix
+            ensure_fix_legacy_synastry_reading_id()
 
             # ✅ 2) Eksik kolonları tamamla
             ensure_coffee_schema()

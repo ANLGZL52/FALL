@@ -1,4 +1,3 @@
-# app/models/synastry_db.py
 from __future__ import annotations
 
 from datetime import datetime
@@ -25,15 +24,15 @@ class SynastryReadingDB(SQLModel, table=True):
 
     # Partner A
     name_a: str = Field(default="")
-    birth_date_a: str = Field(default="")  # YYYY-MM-DD
-    birth_time_a: Optional[str] = Field(default=None)  # HH:MM
+    birth_date_a: str = Field(default="")
+    birth_time_a: Optional[str] = Field(default=None)
     birth_city_a: str = Field(default="")
     birth_country_a: str = Field(default="TR")
 
     # Partner B
     name_b: str = Field(default="")
-    birth_date_b: str = Field(default="")  # YYYY-MM-DD
-    birth_time_b: Optional[str] = Field(default=None)  # HH:MM
+    birth_date_b: str = Field(default="")
+    birth_time_b: Optional[str] = Field(default=None)
     birth_city_b: str = Field(default="")
     birth_country_b: str = Field(default="TR")
 

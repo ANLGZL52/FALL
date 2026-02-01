@@ -1,4 +1,3 @@
-# app/api/v1/routes_synastry.py
 from __future__ import annotations
 
 from uuid import uuid4
@@ -8,11 +7,7 @@ from sqlmodel import Session
 
 from app.db import get_session
 from app.core.device import get_device_id
-from app.schemas.synastry import (
-    SynastryStartRequest,
-    SynastryMarkPaidRequest,
-    SynastryRatingRequest,
-)
+from app.schemas.synastry import SynastryStartRequest, SynastryMarkPaidRequest, SynastryRatingRequest
 from app.repositories.synastry_repo import synastry_repo
 
 from app.services.synastry_service import generate_synastry_reading
@@ -28,12 +23,10 @@ def start(
     session: Session = Depends(get_session),
     device_id: str = Depends(get_device_id),
 ):
-    reading_id = str(uuid4())
     try:
         reading = synastry_repo.create(
             session=session,
-            reading_id=reading_id,
-            device_id=device_id,  # ✅ KRİTİK FIX
+            device_id=device_id,
             name_a=payload.name_a,
             birth_date_a=payload.birth_date_a,
             birth_time_a=payload.birth_time_a,
@@ -49,21 +42,14 @@ def start(
         )
         return reading
     except Exception as e:
-        # Prod'da 500'ü yakalayıp anlamlı mesaj döndürmek istersen:
         raise HTTPException(status_code=500, detail=f"Synastry start failed: {e}")
 
 
 @router.get("/{reading_id}")
-def get_status(reading_id: str, session: Session = Depends(get_session), device_id: str = Depends(get_device_id)):
+def get_status(reading_id: str, session: Session = Depends(get_session)):
     reading = synastry_repo.get(session=session, reading_id=reading_id)
     if not reading:
         raise HTTPException(status_code=404, detail="Reading not found")
-
-    # ✅ Ownership check (istersen zorunlu yap)
-    rid = (reading.get("device_id") or "").strip()
-    if rid and rid != device_id:
-        raise HTTPException(status_code=404, detail="Reading not found")
-
     return reading
 
 
@@ -72,42 +58,28 @@ def mark_paid(
     reading_id: str,
     payload: SynastryMarkPaidRequest | None = None,
     session: Session = Depends(get_session),
-    device_id: str = Depends(get_device_id),
 ):
     payment_ref = (payload.payment_ref if payload else None)
 
     if not payment_ref:
         raise HTTPException(status_code=422, detail="payment_ref is required")
 
-    # ✅ Swagger'da sen "string" yollamışsın, o yüzden 403 almışsın.
     if not str(payment_ref).startswith("TEST-"):
         raise HTTPException(
             status_code=403,
             detail="mark-paid is legacy only. Use /payments/verify for real payments.",
         )
 
-    reading = synastry_repo.get(session=session, reading_id=reading_id)
+    reading = synastry_repo.mark_paid(session=session, reading_id=reading_id, payment_ref=payment_ref)
     if not reading:
         raise HTTPException(status_code=404, detail="Reading not found")
-
-    rid = (reading.get("device_id") or "").strip()
-    if rid and rid != device_id:
-        raise HTTPException(status_code=404, detail="Reading not found")
-
-    updated = synastry_repo.mark_paid(session=session, reading_id=reading_id, payment_ref=payment_ref)
-    if not updated:
-        raise HTTPException(status_code=404, detail="Reading not found")
-    return updated
+    return reading
 
 
 @router.post("/{reading_id}/generate")
-def generate(reading_id: str, session: Session = Depends(get_session), device_id: str = Depends(get_device_id)):
+def generate(reading_id: str, session: Session = Depends(get_session)):
     reading, claimed = synastry_repo.claim_processing(session=session, reading_id=reading_id)
     if not reading:
-        raise HTTPException(status_code=404, detail="Reading not found")
-
-    rid = (reading.get("device_id") or "").strip()
-    if rid and rid != device_id:
         raise HTTPException(status_code=404, detail="Reading not found")
 
     if not reading.get("is_paid"):
@@ -134,7 +106,7 @@ def generate(reading_id: str, session: Session = Depends(get_session), device_id
             topic=reading.get("topic") or "Genel",
             question=reading.get("question"),
         )
-        updated = synastry_repo.set_result(session=session, reading_id=reading_id, result_text=(result_text or "").strip())
+        updated = synastry_repo.set_result(session=session, reading_id=reading_id, result_text=result_text)
         return updated
     except Exception as e:
         synastry_repo.set_status(session=session, reading_id=reading_id, status="paid")
@@ -142,38 +114,17 @@ def generate(reading_id: str, session: Session = Depends(get_session), device_id
 
 
 @router.post("/{reading_id}/rate")
-def rate(
-    reading_id: str,
-    payload: SynastryRatingRequest,
-    session: Session = Depends(get_session),
-    device_id: str = Depends(get_device_id),
-):
-    reading = synastry_repo.get(session=session, reading_id=reading_id)
+def rate(reading_id: str, payload: SynastryRatingRequest, session: Session = Depends(get_session)):
+    reading = synastry_repo.set_rating(session=session, reading_id=reading_id, rating=payload.rating)
     if not reading:
         raise HTTPException(status_code=404, detail="Reading not found")
-
-    rid = (reading.get("device_id") or "").strip()
-    if rid and rid != device_id:
-        raise HTTPException(status_code=404, detail="Reading not found")
-
-    updated = synastry_repo.set_rating(session=session, reading_id=reading_id, rating=payload.rating)
-    if not updated:
-        raise HTTPException(status_code=404, detail="Reading not found")
-    return updated
+    return reading
 
 
 @router.get("/{reading_id}/pdf")
-def download_pdf(
-    reading_id: str,
-    session: Session = Depends(get_session),
-    device_id: str = Depends(get_device_id),
-):
+def download_pdf(reading_id: str, session: Session = Depends(get_session)):
     reading = synastry_repo.get(session=session, reading_id=reading_id)
     if not reading:
-        raise HTTPException(status_code=404, detail="Reading not found")
-
-    rid = (reading.get("device_id") or "").strip()
-    if rid and rid != device_id:
         raise HTTPException(status_code=404, detail="Reading not found")
 
     if not (reading.get("result_text") or "").strip():
