@@ -31,6 +31,7 @@ class _CoffeeLoadingScreenState extends State<CoffeeLoadingScreen> {
   String _lastStatus = '';
 
   static const int _hardWarnSec = 45;
+  static const int _hardTimeoutSec = 180; // ✅ yeni: 3 dk sonra çıkış opsiyonu
 
   @override
   void initState() {
@@ -63,6 +64,17 @@ class _CoffeeLoadingScreenState extends State<CoffeeLoadingScreen> {
 
     _elapsed += _pollSec;
 
+    // ✅ hard timeout: kullanıcıyı sonsuza bırakma
+    if (_elapsed >= _hardTimeoutSec) {
+      if (mounted) {
+        setState(() {
+          _error = true;
+          _errorMsg = "Zaman aşımı. Sunucu yanıtı gecikti. Ana sayfaya dönebilirsin.";
+        });
+      }
+      return;
+    }
+
     try {
       final deviceId = await DeviceIdService.getOrCreate();
       final d = await CoffeeApi.detailRaw(readingId: widget.readingId, deviceId: deviceId);
@@ -70,11 +82,10 @@ class _CoffeeLoadingScreenState extends State<CoffeeLoadingScreen> {
       final status = (d['status'] ?? '').toString().trim();
       final isPaid = _asBool(d['is_paid']);
 
-      // Backend bazen comment, bazen result_text döndürebilir.
       final text = ((d['comment'] ?? d['result_text']) ?? '').toString().trim();
 
-      // ✅ DONE/KOMPLE ise sonuç ekranı
-      if (text.isNotEmpty && (status == 'done' || status == 'completed')) {
+      // ✅ En sağlam kural: text geldiyse iş bitmiştir (status’a güvenme)
+      if (text.isNotEmpty) {
         _done = true;
         if (!mounted) return;
 
@@ -85,14 +96,13 @@ class _CoffeeLoadingScreenState extends State<CoffeeLoadingScreen> {
         return;
       }
 
-      // ✅ Eğer processing -> paid'a geri düşerse (AI hata/timeout), tekrar generate tetikleyelim
+      // ✅ processing -> paid dönüşü: generate yeniden tetiklenebilir
       final cameBackFromProcessing = (_lastStatus == 'processing' && status == 'paid');
 
-      // ✅ is_paid true ise, processing değilken generate tetiklenebilir
+      // ✅ ödeme doğrulandıysa generate tetikle
       if (isPaid && (!_generateTriggered || cameBackFromProcessing)) {
         if (status != 'processing') {
           _generateTriggered = true;
-          // generate endpointi kendi içinde status'u processing yapmalı ve idempotent olmalı
           await CoffeeApi.generate(readingId: widget.readingId, deviceId: deviceId);
         }
       }
