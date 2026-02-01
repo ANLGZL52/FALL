@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 from typing import List, Optional
 from datetime import datetime
-from uuid import uuid4
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from pydantic import BaseModel
@@ -38,7 +37,7 @@ class RatingRequest(BaseModel):
 def _get_or_404_owner(session: Session, reading_id: str, device_id: str) -> HandReadingDB:
     """
     ✅ Ownership check: sadece aynı cihaz bu reading'e erişebilir.
-    Legacy kayıtlar için device_id boşsa ilk erişimde bağlanır.
+    Legacy kayıtlar için device_id boşsa, ilk erişimde bağlanır.
     """
     r = get_reading(session, reading_id)
     if not r:
@@ -46,18 +45,15 @@ def _get_or_404_owner(session: Session, reading_id: str, device_id: str) -> Hand
 
     rid = (getattr(r, "device_id", None) or "").strip()
 
-    # ✅ Eğer kayıt device_id ile kilitliyse ve farklı cihazsa => 404
     if rid and rid != device_id:
         raise HTTPException(status_code=404, detail="El falı bulunamadı.")
 
-    # ✅ Legacy: device_id boşsa ilk erişimde bağla
     if not rid:
         try:
             setattr(r, "device_id", device_id)
             r.updated_at = datetime.utcnow()
             update_reading(session, r)
         except Exception:
-            # Kolon yoksa / migration eksikse patlatma
             pass
 
     return r
@@ -117,7 +113,6 @@ async def start(
     device_id: str = Depends(get_device_id),
 ):
     db_obj = HandReadingDB(
-        id=str(uuid4()),
         topic=req.topic,
         question=req.question,
         name=req.name,
@@ -135,7 +130,6 @@ async def start(
         updated_at=datetime.utcnow(),
     )
 
-    # ✅ device_id yaz (kolon varsa)
     try:
         setattr(db_obj, "device_id", device_id)
     except Exception:
@@ -157,7 +151,6 @@ async def upload_images(
 ):
     _get_or_404_owner(session, reading_id, device_id)
 
-    # ✅ 1–3 foto kuralı
     if len(files) < 1 or len(files) > 3:
         raise HTTPException(
             status_code=400,
@@ -169,10 +162,7 @@ async def upload_images(
     verdict = validate_hand_images(saved)
     if not verdict.get("ok", False):
         _delete_paths(saved)
-        raise HTTPException(
-            status_code=400,
-            detail=_hand_upload_user_message(verdict),
-        )
+        raise HTTPException(status_code=400, detail=_hand_upload_user_message(verdict))
 
     r2 = set_photos(session, reading_id, saved)
     return _to_schema(r2)
@@ -205,7 +195,6 @@ async def mark_paid(
             detail="Gerçek ödemeler için /payments/verify kullanılır.",
         )
 
-    # ✅ idempotent
     if r.is_paid and r.payment_ref:
         return _to_schema(r)
 
@@ -236,24 +225,21 @@ async def generate(
     if not r.is_paid:
         raise HTTPException(status_code=402, detail="Ödeme yapılmadan yorum oluşturulamaz.")
 
-    # idempotent
-    if (r.status or "").lower().strip() == "completed" and (r.result_text or "").strip():
+    status = (r.status or "").lower().strip()
+    result_text = (r.result_text or "").strip()
+
+    if result_text and status == "completed":
         return _to_schema(r)
 
-    # processing ise tekrar çağırma (kalkan)
-    if (r.status or "").lower().strip() == "processing":
+    if status == "processing":
         return _to_schema(r)
 
     verdict = validate_hand_images(photos)
     if not verdict.get("ok", False):
-        raise HTTPException(
-            status_code=400,
-            detail=_hand_upload_user_message(verdict),
-        )
-
-    set_status(session, reading_id, "processing")
+        raise HTTPException(status_code=400, detail=_hand_upload_user_message(verdict))
 
     try:
+        set_status(session, reading_id, "processing")
         comment = generate_hand_fortune(
             name=r.name,
             topic=r.topic,
@@ -273,7 +259,6 @@ async def generate(
     except HTTPException:
         raise
     except Exception as e:
-        # tekrar denemeye izin ver
         try:
             set_status(session, reading_id, "paid")
         except Exception:

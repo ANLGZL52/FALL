@@ -2,16 +2,18 @@
 from __future__ import annotations
 
 from uuid import uuid4
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Header
 from fastapi.responses import Response
 from sqlmodel import Session
 
 from app.db import get_session
-from app.schemas.synastry import SynastryStartRequest, SynastryMarkPaidRequest, SynastryRatingRequest
+from app.schemas.synastry import (
+    SynastryStartRequest,
+    SynastryMarkPaidRequest,
+    SynastryRatingRequest,
+)
 from app.repositories.synastry_repo import synastry_repo
 
-# Not: sende generate_synastry_reading hangi modüldeyse orası kalsın.
-# Ben burada senin kullandığın importu bozmuyorum:
 from app.services.synastry_service import generate_synastry_reading
 from app.services.pdf_service import build_synastry_pdf_bytes
 
@@ -20,11 +22,21 @@ router = APIRouter(prefix="/synastry", tags=["synastry"])
 
 
 @router.post("/start")
-def start(payload: SynastryStartRequest, session: Session = Depends(get_session)):
+def start(
+    payload: SynastryStartRequest,
+    session: Session = Depends(get_session),
+    x_device_id: str | None = Header(default=None, alias="X-Device-Id"),
+):
+    # ✅ Profil/sahiplik için kritik
+    if not x_device_id:
+        raise HTTPException(status_code=422, detail="X-Device-Id header is required")
+
     reading_id = str(uuid4())
+
     reading = synastry_repo.create(
         session=session,
         reading_id=reading_id,
+        device_id=x_device_id,  # ✅ eklendi
         name_a=payload.name_a,
         birth_date_a=payload.birth_date_a,
         birth_time_a=payload.birth_time_a,
@@ -100,7 +112,6 @@ def generate(reading_id: str, session: Session = Depends(get_session)):
 
     # 4) processing ama bu request claim etmediyse tekrar üretme
     if (reading.get("status") or "").lower().strip() == "processing" and not claimed:
-        # burada 200 dönüyoruz; Flutter zaten poll ediyor.
         return reading
 
     # 5) Bu request processing'i claim ettiyse üret

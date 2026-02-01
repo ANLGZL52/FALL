@@ -11,61 +11,49 @@ from sqlmodel import SQLModel, Field
 class TarotReadingDB(SQLModel, table=True):
     __tablename__ = "tarot_readings"
 
-    # ✅ PK
+    # ✅ UUID string PK
     id: str = Field(
         default_factory=lambda: str(uuid.uuid4()),
         primary_key=True,
         index=True,
     )
 
-    # ✅ CİHAZ BAZLI SAHİPLİK (PROFİLİN BEL KEMİĞİ)
+    # ✅ device ownership
     device_id: Optional[str] = Field(
         default=None,
         index=True,
         description="Mobil cihaz kimliği (X-Device-Id)",
     )
 
-    # Kullanıcı bilgileri
+    # kullanıcı
     name: str = Field(default="Misafir", max_length=80)
     age: Optional[int] = Field(default=None)
 
-    # Tarot form
+    # form
     topic: str = Field(default="", max_length=120)
     question: str = Field(default="", max_length=500)
 
-    # Açılım tipi: three / six / twelve
+    # three / six / twelve
     spread_type: str = Field(default="three", max_length=20)
 
-    # Kartlar (json string)
-    cards_json: str = Field(
-        default="[]",
-        description="Seçilen kartların JSON listesi",
-    )
+    # cards json
+    cards_json: str = Field(default="[]", description="Seçilen kartların JSON listesi")
 
-    # Ödeme
-    is_paid: bool = Field(default=False, index=True)  # ✅ (opsiyonel) filtreleme hızlanır
-    payment_ref: Optional[str] = Field(default=None)
+    # ödeme
+    is_paid: bool = Field(default=False, index=True)
+    payment_ref: Optional[str] = Field(default=None, index=True)
 
-    # Durum: pending_payment / selected / paid / processing / completed
-    status: str = Field(
-        default="pending_payment",
-        max_length=30,
-        index=True,
-    )
+    # status
+    status: str = Field(default="pending_payment", max_length=30, index=True)
 
-    # Çıktı
+    # sonuç / rating
     result_text: Optional[str] = Field(default=None)
-
-    # Puan
     rating: Optional[int] = Field(default=None)
 
-    # Zaman
-    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)  # ✅ (opsiyonel) listelerken hız
+    # timestamps
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
-    # --------------------
-    # Helpers
-    # --------------------
     def get_cards(self) -> List[str]:
         try:
             data = json.loads(self.cards_json or "[]")
@@ -74,4 +62,4 @@ class TarotReadingDB(SQLModel, table=True):
             return []
 
     def set_cards(self, cards: List[str]) -> None:
-        self.cards_json = json.dumps(cards, ensure_ascii=False)
+        self.cards_json = json.dumps(cards or [], ensure_ascii=False)

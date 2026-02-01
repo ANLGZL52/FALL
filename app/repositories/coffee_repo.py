@@ -1,4 +1,6 @@
 # app/repositories/coffee_repo.py
+from __future__ import annotations
+
 import json
 from typing import List, Optional
 from datetime import datetime
@@ -14,12 +16,14 @@ def _list_to_json(items: List[str]) -> str:
 
 def _list_from_json(s: str) -> List[str]:
     try:
-        return json.loads(s or "[]")
+        data = json.loads(s or "[]")
+        return data if isinstance(data, list) else []
     except Exception:
         return []
 
 
 def get_reading(session: Session, reading_id: str) -> Optional[CoffeeReadingDB]:
+    # ✅ PK üzerinden
     return session.get(CoffeeReadingDB, reading_id)
 
 
@@ -31,8 +35,7 @@ def create_reading(session: Session, r: CoffeeReadingDB) -> CoffeeReadingDB:
 
 
 def update_reading(session: Session, r: CoffeeReadingDB) -> CoffeeReadingDB:
-    if hasattr(r, "updated_at"):
-        r.updated_at = datetime.utcnow()  # type: ignore[attr-defined]
+    r.updated_at = datetime.utcnow()
     session.add(r)
     session.commit()
     session.refresh(r)
@@ -40,6 +43,7 @@ def update_reading(session: Session, r: CoffeeReadingDB) -> CoffeeReadingDB:
 
 
 def _get_images_json_field(r: CoffeeReadingDB) -> str:
+    # eski db uyumu için
     if hasattr(r, "images_json"):
         return getattr(r, "images_json") or "[]"
     if hasattr(r, "photos_json"):
@@ -63,7 +67,9 @@ def set_photos(session: Session, reading_id: str, photos: List[str]) -> CoffeeRe
         raise KeyError("not_found")
 
     _set_images_json_field(r, _list_to_json(photos))
-    r.status = "photos_uploaded"
+
+    # ✅ model ile uyumlu status
+    r.status = "images_uploaded"
     return update_reading(session, r)
 
 
@@ -85,11 +91,10 @@ def set_status(
     r.status = status
 
     if comment is not None:
+        # coffee modelinde result_text var
         if hasattr(r, "result_text"):
             r.result_text = comment
         elif hasattr(r, "comment"):
-            r.comment = comment
-        else:
-            pass
+            r.comment = comment  # type: ignore[attr-defined]
 
     return update_reading(session, r)

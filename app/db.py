@@ -1,8 +1,10 @@
 # app/db.py
 from __future__ import annotations
 
-from typing import Generator, Dict
+from typing import Generator, Dict, Optional
+
 from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
 from sqlmodel import SQLModel, Session, create_engine
 
 from app.core.config import settings
@@ -24,14 +26,14 @@ def _normalize_database_url(url: str) -> str:
         return url
 
     if url.startswith("postgres://"):
-        url = "postgresql://" + url[len("postgres://"):]
+        url = "postgresql://" + url[len("postgres://") :]
 
-    # already contains driver (postgresql+psycopg etc.)
+    # zaten driver belirtilmişse dokunma
     if url.startswith("postgresql+"):
         return url
 
     if url.startswith("postgresql://"):
-        return "postgresql+psycopg://" + url[len("postgresql://"):]
+        return "postgresql+psycopg://" + url[len("postgresql://") :]
 
     return url
 
@@ -52,59 +54,6 @@ engine = create_engine(
 def get_session() -> Generator[Session, None, None]:
     with Session(engine) as session:
         yield session
-
-
-def init_db() -> None:
-    """
-    - SQLite: create_all + sqlite migration helper'ları
-    - Postgres: advisory lock + create_all + postgres migration helper'ları
-    """
-    try:
-        if db_url.startswith("sqlite"):
-            print(f"[DB] database_url = {db_url}")
-        else:
-            print(f"[DB] database_url = {db_url} (non-sqlite)")
-    except Exception as e:
-        print(f"[DB] Could not read database info: {e}")
-
-    if _is_sqlite():
-        SQLModel.metadata.create_all(engine)
-
-        # ✅ SQLite migration helper’lar
-        ensure_coffee_schema()
-        ensure_hand_schema()
-        ensure_tarot_schema()
-        ensure_numerology_schema()
-        ensure_birthchart_schema()
-        ensure_personality_schema()
-        ensure_synastry_schema()
-        ensure_payments_schema()
-        ensure_profile_schema()
-        return
-
-    # ✅ Postgres: multi-worker aynı anda ALTER basmasın
-    LOCK_KEY = 91520260115
-
-    with engine.connect() as conn:
-        conn.execute(text("SELECT pg_advisory_lock(:k)"), {"k": LOCK_KEY})
-        try:
-            SQLModel.metadata.create_all(engine)
-
-            # ✅ Postgres migration helper’lar
-            ensure_coffee_schema()
-            ensure_hand_schema()
-            ensure_tarot_schema()
-            ensure_numerology_schema()
-            ensure_birthchart_schema()
-            ensure_personality_schema()
-            ensure_synastry_schema()
-            ensure_payments_schema()
-            ensure_profile_schema()
-
-            # ✅ modelde unique=True var → postgres'te garanti altına al
-            ensure_profile_constraints()
-        finally:
-            conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": LOCK_KEY})
 
 
 # ==========================================================
@@ -142,7 +91,6 @@ def _sqlite_add_cols(table: str, alters: list[str]) -> None:
     if not alters:
         print(f"[DB] {table} schema OK.")
         return
-
     with engine.begin() as conn:
         for stmt in alters:
             conn.execute(text(stmt))
@@ -153,12 +101,14 @@ def _sqlite_add_cols(table: str, alters: list[str]) -> None:
 def _pg_has_table(table: str) -> bool:
     if not _is_postgres():
         return False
-    q = text("""
+    q = text(
+        """
         SELECT 1
         FROM information_schema.tables
         WHERE table_schema='public' AND table_name=:t
         LIMIT 1;
-    """)
+    """
+    )
     with engine.connect() as conn:
         row = conn.execute(q, {"t": table}).fetchone()
     return row is not None
@@ -167,24 +117,46 @@ def _pg_has_table(table: str) -> bool:
 def _pg_has_column(table: str, column: str) -> bool:
     if not _is_postgres():
         return False
-    q = text("""
+    q = text(
+        """
         SELECT 1
         FROM information_schema.columns
         WHERE table_schema='public'
           AND table_name=:t
           AND column_name=:c
         LIMIT 1;
-    """)
+    """
+    )
     with engine.connect() as conn:
         row = conn.execute(q, {"t": table, "c": column}).fetchone()
     return row is not None
+
+
+def _pg_column_type(table: str, column: str) -> Optional[str]:
+    """
+    returns: 'integer', 'bigint', 'character varying', 'text', ...
+    """
+    if not _is_postgres():
+        return None
+    q = text(
+        """
+        SELECT data_type
+        FROM information_schema.columns
+        WHERE table_schema='public'
+          AND table_name=:t
+          AND column_name=:c
+        LIMIT 1;
+    """
+    )
+    with engine.connect() as conn:
+        row = conn.execute(q, {"t": table, "c": column}).fetchone()
+    return row[0] if row else None
 
 
 def _pg_add_cols(table: str, alters: list[str]) -> None:
     if not alters:
         print(f"[DB] {table} schema OK.")
         return
-
     with engine.begin() as conn:
         for stmt in alters:
             conn.execute(text(stmt))
@@ -192,11 +164,6 @@ def _pg_add_cols(table: str, alters: list[str]) -> None:
 
 
 def _ensure_columns(table: str, columns: Dict[str, str]) -> None:
-    """
-    columns: {"col_name": "VARCHAR", "created_at": "TIMESTAMP", ...}
-    - SQLite: ALTER TABLE ... ADD COLUMN ... (TIMESTAMP->DATETIME map)
-    - Postgres: ALTER TABLE ... ADD COLUMN IF NOT EXISTS ...
-    """
     if _is_sqlite():
         if not _sqlite_has_table(table):
             return
@@ -214,200 +181,348 @@ def _ensure_columns(table: str, columns: Dict[str, str]) -> None:
         alters: list[str] = []
         for col, coltype in columns.items():
             if not _pg_has_column(table, col):
-                alters.append(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {coltype};")
+                alters.append(
+                    f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {coltype};"
+                )
         _pg_add_cols(table, alters)
         return
 
 
 # ==========================================================
-# SCHEMA ENSURE (ALL TABLES)
+# ✅ Fix legacy SERIAL/INTEGER/BIGINT id -> VARCHAR
 # ==========================================================
-def ensure_coffee_schema() -> None:
-    _ensure_columns("coffee_readings", {
-        "device_id": "VARCHAR",
-        "created_at": "TIMESTAMP",
-        "updated_at": "TIMESTAMP",
-        "is_paid": "BOOLEAN",
-        "payment_ref": "VARCHAR",
-        "status": "VARCHAR",
-        "result_text": "VARCHAR",
-        "rating": "INTEGER",
-        "images_json": "VARCHAR",
-        "name": "VARCHAR",
-        "age": "INTEGER",
-        "topic": "VARCHAR",
-        "question": "VARCHAR",
-    })
-
-
-def ensure_hand_schema() -> None:
-    _ensure_columns("hand_readings", {
-        "device_id": "VARCHAR",
-        "dominant_hand": "VARCHAR",
-        "photo_hand": "VARCHAR",
-        "relationship_status": "VARCHAR",
-        "big_decision": "VARCHAR",
-        "created_at": "TIMESTAMP",
-        "updated_at": "TIMESTAMP",
-        "is_paid": "BOOLEAN",
-        "payment_ref": "VARCHAR",
-        "status": "VARCHAR",
-        "result_text": "VARCHAR",
-        "rating": "INTEGER",
-        "images_json": "VARCHAR",
-        "name": "VARCHAR",
-        "age": "INTEGER",
-        "topic": "VARCHAR",
-        "question": "VARCHAR",
-    })
-
-
-def ensure_tarot_schema() -> None:
-    _ensure_columns("tarot_readings", {
-        "device_id": "VARCHAR",
-        "name": "VARCHAR",
-        "age": "INTEGER",
-        "topic": "VARCHAR",
-        "question": "VARCHAR",
-        "spread_type": "VARCHAR",
-        "cards_json": "VARCHAR",
-        "is_paid": "BOOLEAN",
-        "payment_ref": "VARCHAR",
-        "status": "VARCHAR",
-        "result_text": "VARCHAR",
-        "rating": "INTEGER",
-        "created_at": "TIMESTAMP",
-        "updated_at": "TIMESTAMP",
-    })
-
-
-def ensure_numerology_schema() -> None:
-    _ensure_columns("numerology_readings", {
-        "device_id": "VARCHAR",
-        "payment_ref": "VARCHAR",
-        "rating": "INTEGER",
-        "result_text": "VARCHAR",
-        "created_at": "TIMESTAMP",
-        "updated_at": "TIMESTAMP",
-        "status": "VARCHAR",
-        "question": "VARCHAR",
-        "name": "VARCHAR",
-        "birth_date": "VARCHAR",
-    })
-
-
-def ensure_birthchart_schema() -> None:
-    _ensure_columns("birthchart_readings", {
-        "device_id": "VARCHAR",
-        "birth_time": "VARCHAR",
-        "payment_ref": "VARCHAR",
-        "rating": "INTEGER",
-        "result_text": "VARCHAR",
-        "created_at": "TIMESTAMP",
-        "updated_at": "TIMESTAMP",
-        "status": "VARCHAR",
-        "question": "VARCHAR",
-        "name": "VARCHAR",
-        "birth_date": "VARCHAR",
-        "birth_place": "VARCHAR",
-    })
-
-
-def ensure_personality_schema() -> None:
-    _ensure_columns("personality_readings", {
-        "device_id": "VARCHAR",
-        "payment_ref": "VARCHAR",
-        "rating": "INTEGER",
-        "result_text": "VARCHAR",
-        "created_at": "TIMESTAMP",
-        "updated_at": "TIMESTAMP",
-        "status": "VARCHAR",
-        "question": "VARCHAR",
-        "name": "VARCHAR",
-        "birth_date": "VARCHAR",
-        "birth_time": "VARCHAR",
-    })
-
-
-def ensure_synastry_schema() -> None:
-    # ✅ MODELE %100 UYUMLU: SynastryReadingDB
-    _ensure_columns("synastry_readings", {
-        "device_id": "VARCHAR",
-
-        "name_a": "VARCHAR",
-        "birth_date_a": "VARCHAR",
-        "birth_time_a": "VARCHAR",
-        "birth_city_a": "VARCHAR",
-        "birth_country_a": "VARCHAR",
-
-        "name_b": "VARCHAR",
-        "birth_date_b": "VARCHAR",
-        "birth_time_b": "VARCHAR",
-        "birth_city_b": "VARCHAR",
-        "birth_country_b": "VARCHAR",
-
-        "topic": "VARCHAR",
-        "question": "VARCHAR",
-
-        "is_paid": "BOOLEAN",
-        "payment_ref": "VARCHAR",
-
-        "status": "VARCHAR",
-        "result_text": "VARCHAR",
-        "rating": "INTEGER",
-
-        "created_at": "TIMESTAMP",
-        "updated_at": "TIMESTAMP",
-    })
-
-
-def ensure_payments_schema() -> None:
-    _ensure_columns("payments", {
-        "device_id": "VARCHAR",
-        "reading_id": "VARCHAR",
-        "product": "VARCHAR",
-        "sku": "VARCHAR",
-        "amount": "DOUBLE PRECISION",
-        "currency": "VARCHAR",
-        "status": "VARCHAR",
-        "platform": "VARCHAR",
-        "transaction_id": "VARCHAR",
-        "purchase_token": "VARCHAR",
-        "receipt_data": "VARCHAR",
-        "created_at": "TIMESTAMP",
-        "verified_at": "TIMESTAMP",
-    })
-
-
-def ensure_profile_schema() -> None:
-    # ✅ MODELE %100 UYUMLU: UserProfileDB
-    _ensure_columns("user_profiles", {
-        "device_id": "VARCHAR",
-        "display_name": "VARCHAR",
-        "birth_date": "VARCHAR",
-        "birth_place": "VARCHAR",
-        "birth_time": "VARCHAR",
-        "created_at": "TIMESTAMP",
-        "updated_at": "TIMESTAMP",
-    })
-
-
-def ensure_profile_constraints() -> None:
+def ensure_id_varchar(table: str) -> None:
     """
-    UserProfileDB: device_id unique=True
-    - SQLModel bazen unique constraint'i create_all ile ekler, bazen eski DB'de yoktur.
-    - Postgres'te unique index ile garantiye alıyoruz.
+    Legacy DB'lerde id SERIAL/INTEGER/BIGINT/IDENTITY gelebiliyor.
+    Model UUID string gönderdiği için id kolonu VARCHAR olmalı.
     """
     if not _is_postgres():
         return
+    if not _pg_has_table(table):
+        return
+    if not _pg_has_column(table, "id"):
+        return
 
-    # tablo yoksa zaten create_all oluşturur; yoksa da safe davranır
+    dtype = _pg_column_type(table, "id")  # 'integer', 'bigint', ...
+    if dtype in ("integer", "bigint"):
+        print(f"[DB] {table}.id is {dtype} -> converting to VARCHAR...")
+
+        with engine.begin() as conn:
+            # 1) IDENTITY varsa düşür (Postgres 10+)
+            try:
+                conn.execute(
+                    text(
+                        f"""
+                        ALTER TABLE {table}
+                          ALTER COLUMN id DROP IDENTITY IF EXISTS;
+                        """
+                    )
+                )
+            except Exception:
+                pass
+
+            # 2) SERIAL default/nextval varsa düşür
+            try:
+                conn.execute(
+                    text(
+                        f"""
+                        ALTER TABLE {table}
+                          ALTER COLUMN id DROP DEFAULT;
+                        """
+                    )
+                )
+            except Exception:
+                pass
+
+            # 3) Type değiştir
+            conn.execute(
+                text(
+                    f"""
+                    ALTER TABLE {table}
+                      ALTER COLUMN id TYPE VARCHAR
+                      USING id::text;
+                    """
+                )
+            )
+
+        print(f"[DB] {table}.id converted to VARCHAR.")
+
+
+# ==========================================================
+# SCHEMA ENSURE
+# ==========================================================
+def ensure_coffee_schema() -> None:
+    _ensure_columns(
+        "coffee_readings",
+        {
+            "device_id": "VARCHAR",
+            "created_at": "TIMESTAMP",
+            "updated_at": "TIMESTAMP",
+            "is_paid": "BOOLEAN",
+            "payment_ref": "VARCHAR",
+            "status": "VARCHAR",
+            "result_text": "VARCHAR",
+            "rating": "INTEGER",
+            "images_json": "VARCHAR",
+            "name": "VARCHAR",
+            "age": "INTEGER",
+            "topic": "VARCHAR",
+            "question": "VARCHAR",
+        },
+    )
+
+
+def ensure_hand_schema() -> None:
+    _ensure_columns(
+        "hand_readings",
+        {
+            "device_id": "VARCHAR",
+            "dominant_hand": "VARCHAR",
+            "photo_hand": "VARCHAR",
+            "relationship_status": "VARCHAR",
+            "big_decision": "VARCHAR",
+            "created_at": "TIMESTAMP",
+            "updated_at": "TIMESTAMP",
+            "is_paid": "BOOLEAN",
+            "payment_ref": "VARCHAR",
+            "status": "VARCHAR",
+            "result_text": "VARCHAR",
+            "rating": "INTEGER",
+            "images_json": "VARCHAR",
+            "name": "VARCHAR",
+            "age": "INTEGER",
+            "topic": "VARCHAR",
+            "question": "VARCHAR",
+        },
+    )
+
+
+def ensure_tarot_schema() -> None:
+    _ensure_columns(
+        "tarot_readings",
+        {
+            "device_id": "VARCHAR",
+            "name": "VARCHAR",
+            "age": "INTEGER",
+            "topic": "VARCHAR",
+            "question": "VARCHAR",
+            "spread_type": "VARCHAR",
+            "cards_json": "VARCHAR",
+            "is_paid": "BOOLEAN",
+            "payment_ref": "VARCHAR",
+            "status": "VARCHAR",
+            "result_text": "VARCHAR",
+            "rating": "INTEGER",
+            "created_at": "TIMESTAMP",
+            "updated_at": "TIMESTAMP",
+        },
+    )
+
+
+def ensure_numerology_schema() -> None:
+    _ensure_columns(
+        "numerology_readings",
+        {
+            "device_id": "VARCHAR",
+            "payment_ref": "VARCHAR",
+            "rating": "INTEGER",
+            "result_text": "VARCHAR",
+            "created_at": "TIMESTAMP",
+            "updated_at": "TIMESTAMP",
+            "status": "VARCHAR",
+            "question": "VARCHAR",
+            "name": "VARCHAR",
+            "birth_date": "VARCHAR",
+            "topic": "VARCHAR",
+            "is_paid": "BOOLEAN",
+        },
+    )
+
+
+def ensure_birthchart_schema() -> None:
+    _ensure_columns(
+        "birthchart_readings",
+        {
+            "device_id": "VARCHAR",
+            "birth_time": "VARCHAR",
+            "payment_ref": "VARCHAR",
+            "rating": "INTEGER",
+            "result_text": "VARCHAR",
+            "created_at": "TIMESTAMP",
+            "updated_at": "TIMESTAMP",
+            "status": "VARCHAR",
+            "question": "VARCHAR",
+            "name": "VARCHAR",
+            "birth_date": "VARCHAR",
+            "birth_place": "VARCHAR",
+            "topic": "VARCHAR",
+            "is_paid": "BOOLEAN",
+        },
+    )
+
+
+def ensure_personality_schema() -> None:
+    _ensure_columns(
+        "personality_readings",
+        {
+            "device_id": "VARCHAR",
+            "payment_ref": "VARCHAR",
+            "rating": "INTEGER",
+            "result_text": "VARCHAR",
+            "created_at": "TIMESTAMP",
+            "updated_at": "TIMESTAMP",
+            "status": "VARCHAR",
+            "question": "VARCHAR",
+            "name": "VARCHAR",
+            "birth_date": "VARCHAR",
+            "birth_time": "VARCHAR",
+            "topic": "VARCHAR",
+            "is_paid": "BOOLEAN",
+        },
+    )
+
+
+def ensure_synastry_schema() -> None:
+    _ensure_columns(
+        "synastry_readings",
+        {
+            "device_id": "VARCHAR",
+            "name_a": "VARCHAR",
+            "birth_date_a": "VARCHAR",
+            "birth_time_a": "VARCHAR",
+            "birth_city_a": "VARCHAR",
+            "birth_country_a": "VARCHAR",
+            "name_b": "VARCHAR",
+            "birth_date_b": "VARCHAR",
+            "birth_time_b": "VARCHAR",
+            "birth_city_b": "VARCHAR",
+            "birth_country_b": "VARCHAR",
+            "topic": "VARCHAR",
+            "question": "VARCHAR",
+            "is_paid": "BOOLEAN",
+            "payment_ref": "VARCHAR",
+            "status": "VARCHAR",
+            "result_text": "VARCHAR",
+            "rating": "INTEGER",
+            "created_at": "TIMESTAMP",
+            "updated_at": "TIMESTAMP",
+        },
+    )
+
+
+def ensure_payments_schema() -> None:
+    _ensure_columns(
+        "payments",
+        {
+            "device_id": "VARCHAR",
+            "reading_id": "VARCHAR",
+            "product": "VARCHAR",
+            "sku": "VARCHAR",
+            "amount": "DOUBLE PRECISION",
+            "currency": "VARCHAR",
+            "status": "VARCHAR",
+            "platform": "VARCHAR",
+            "transaction_id": "VARCHAR",
+            "purchase_token": "VARCHAR",
+            "receipt_data": "VARCHAR",
+            "created_at": "TIMESTAMP",
+            "verified_at": "TIMESTAMP",
+        },
+    )
+
+
+def ensure_profile_schema() -> None:
+    _ensure_columns(
+        "user_profiles",
+        {
+            "device_id": "VARCHAR",
+            "display_name": "VARCHAR",
+            "birth_date": "VARCHAR",
+            "birth_place": "VARCHAR",
+            "birth_time": "VARCHAR",
+            "created_at": "TIMESTAMP",
+            "updated_at": "TIMESTAMP",
+        },
+    )
+
+
+def ensure_profile_constraints() -> None:
+    if not _is_postgres():
+        return
     if not _pg_has_table("user_profiles"):
         return
 
-    # device_id unique index
     with engine.begin() as conn:
-        conn.execute(text("""
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_user_profiles_device_id
-            ON user_profiles (device_id);
-        """))
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS ux_user_profiles_device_id
+                ON user_profiles (device_id);
+                """
+            )
+        )
+
+
+def init_db() -> None:
+    """
+    - SQLite: create_all + sqlite migration helper'ları
+    - Postgres: advisory lock + create_all + postgres migration helper'ları
+    """
+    try:
+        if db_url.startswith("sqlite"):
+            print(f"[DB] database_url = {db_url}")
+        else:
+            print(f"[DB] database_url = {db_url} (non-sqlite)")
+    except Exception as e:
+        print(f"[DB] Could not read database info: {e}")
+
+    if _is_sqlite():
+        SQLModel.metadata.create_all(engine)
+
+        ensure_coffee_schema()
+        ensure_hand_schema()
+        ensure_tarot_schema()
+        ensure_numerology_schema()
+        ensure_birthchart_schema()
+        ensure_personality_schema()
+        ensure_synastry_schema()
+        ensure_payments_schema()
+        ensure_profile_schema()
+        return
+
+    LOCK_KEY = 91520260115
+
+    with engine.connect() as conn:
+        conn.execute(text("SELECT pg_advisory_lock(:k)"), {"k": LOCK_KEY})
+        try:
+            SQLModel.metadata.create_all(engine)
+
+            # ✅ 1) “eski int/bigint id” tablolarını düzelt (en kritik)
+            for t in (
+                "synastry_readings",
+                "user_profiles",
+                "payments",
+                "tarot_readings",
+                "coffee_readings",
+                "hand_readings",
+                "numerology_readings",
+                "birthchart_readings",
+                "personality_readings",
+            ):
+                ensure_id_varchar(t)
+
+            # ✅ 2) Eksik kolonları tamamla
+            ensure_coffee_schema()
+            ensure_hand_schema()
+            ensure_tarot_schema()
+            ensure_numerology_schema()
+            ensure_birthchart_schema()
+            ensure_personality_schema()
+            ensure_synastry_schema()
+            ensure_payments_schema()
+            ensure_profile_schema()
+
+            # ✅ 3) unique constraint (profile)
+            ensure_profile_constraints()
+        finally:
+            conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": LOCK_KEY})

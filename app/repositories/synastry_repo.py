@@ -15,6 +15,7 @@ class SynastryRepo:
         *,
         session: Session,
         reading_id: str,
+        device_id: Optional[str],
         name_a: str,
         birth_date_a: str,
         birth_time_a: Optional[str],
@@ -28,38 +29,55 @@ class SynastryRepo:
         topic: str,
         question: Optional[str],
     ) -> Dict[str, Any]:
+        """
+        reading_id: dış dünyaya döndüğümüz id (uuid string) -> DB'de SynastryReadingDB.id
+        """
         row = SynastryReadingDB(
-            reading_id=reading_id,
-            name_a=name_a,
-            birth_date_a=birth_date_a,
+            id=reading_id,              # ✅ reading_id -> id
+            device_id=device_id,        # ✅ profil sahipliği
+
+            name_a=name_a or "",
+            birth_date_a=birth_date_a or "",
             birth_time_a=birth_time_a,
-            birth_city_a=birth_city_a,
+            birth_city_a=birth_city_a or "",
             birth_country_a=birth_country_a or "TR",
-            name_b=name_b,
-            birth_date_b=birth_date_b,
+
+            name_b=name_b or "",
+            birth_date_b=birth_date_b or "",
             birth_time_b=birth_time_b,
-            birth_city_b=birth_city_b,
+            birth_city_b=birth_city_b or "",
             birth_country_b=birth_country_b or "TR",
+
             topic=topic or "genel",
             question=question,
+
             status="started",
             is_paid=False,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
         )
+
         session.add(row)
         session.commit()
         session.refresh(row)
         return row.model_dump()
 
     def get(self, *, session: Session, reading_id: str) -> Optional[Dict[str, Any]]:
-        stmt = select(SynastryReadingDB).where(SynastryReadingDB.reading_id == reading_id)
+        stmt = select(SynastryReadingDB).where(SynastryReadingDB.id == reading_id)  # ✅ id
         row = session.exec(stmt).first()
         return row.model_dump() if row else None
 
     def _get_row(self, *, session: Session, reading_id: str) -> Optional[SynastryReadingDB]:
-        stmt = select(SynastryReadingDB).where(SynastryReadingDB.reading_id == reading_id)
+        stmt = select(SynastryReadingDB).where(SynastryReadingDB.id == reading_id)  # ✅ id
         return session.exec(stmt).first()
 
-    def mark_paid(self, *, session: Session, reading_id: str, payment_ref: Optional[str]) -> Optional[Dict[str, Any]]:
+    def mark_paid(
+        self,
+        *,
+        session: Session,
+        reading_id: str,
+        payment_ref: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
         row = self._get_row(session=session, reading_id=reading_id)
         if not row:
             return None

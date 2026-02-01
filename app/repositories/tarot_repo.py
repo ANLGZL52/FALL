@@ -32,16 +32,11 @@ def update_reading(session: Session, obj: TarotReadingDB) -> TarotReadingDB:
 def set_cards(session: Session, reading_id: str, cards: List[str]) -> TarotReadingDB:
     r = get_reading(session, reading_id)
     if not r:
-        raise ValueError("reading_not_found")
+        raise KeyError("not_found")
 
     r.set_cards(cards)
     r.status = "selected"
-    r.updated_at = datetime.utcnow()
-
-    session.add(r)
-    session.commit()
-    session.refresh(r)
-    return r
+    return update_reading(session, r)
 
 
 def set_status(
@@ -52,18 +47,13 @@ def set_status(
 ) -> TarotReadingDB:
     r = get_reading(session, reading_id)
     if not r:
-        raise ValueError("reading_not_found")
+        raise KeyError("not_found")
 
     r.status = status
     if result_text is not None:
         r.result_text = result_text
 
-    r.updated_at = datetime.utcnow()
-
-    session.add(r)
-    session.commit()
-    session.refresh(r)
-    return r
+    return update_reading(session, r)
 
 
 def claim_processing(session: Session, reading_id: str, *, stale_seconds: int = 120) -> bool:
@@ -72,11 +62,7 @@ def claim_processing(session: Session, reading_id: str, *, stale_seconds: int = 
 
     - completed ise dokunmaz.
     - processing ise dokunmaz (ama stale ise reclaim eder).
-    - Paid/Selected gibi durumlarda processing'e geçirir.
-
-    Neden gerekli?
-    - Worker restart / thread ölümü gibi durumlarda kayıt processing'te takılı kalabiliyor.
-      Bu durumda stale_seconds sonrası tekrar claim edip generate'i yeniden başlatıyoruz.
+    - paid/selected gibi durumlarda processing'e geçirir.
     """
     now = datetime.utcnow()
     stale_cutoff = now - timedelta(seconds=int(stale_seconds or 120))
@@ -97,18 +83,14 @@ def claim_processing(session: Session, reading_id: str, *, stale_seconds: int = 
     res = session.exec(stmt)
     session.commit()
 
-    # rowcount bazı ortamlarda None dönebiliyor → fallback
-    try:
-        if res.rowcount is None:
-            raise RuntimeError("rowcount_none")
-        return bool(res.rowcount > 0)
-    except Exception:
-        r = get_reading(session, reading_id)
-        if not r:
-            return False
+    # rowcount bazı driverlarda None dönebiliyor
+    rc = getattr(res, "rowcount", None)
+    if rc is not None:
+        return bool(rc > 0)
 
-        # updated_at şimdiye çok yakınsa muhtemelen claim ettik
-        if r.status == "processing" and r.updated_at and (now - r.updated_at).total_seconds() < 5:
-            return True
-
+    # fallback: yeniden oku
+    r = get_reading(session, reading_id)
+    if not r:
         return False
+
+    return (r.status == "processing") and ((now - (r.updated_at or now)).total_seconds() < 5)

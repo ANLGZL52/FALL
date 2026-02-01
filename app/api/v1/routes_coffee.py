@@ -1,3 +1,4 @@
+# app/api/v1/routes_coffee.py
 from __future__ import annotations
 
 import os
@@ -57,7 +58,7 @@ def _get_or_404_owner(session: Session, reading_id: str, device_id: str) -> Coff
             r.updated_at = datetime.utcnow()
             update_reading(session, r)
         except Exception:
-            # Kolon yoksa / migration eksikse patlatma
+            # kolon yoksa / migration eksikse patlatma
             pass
 
     return r
@@ -102,7 +103,7 @@ async def start(
     """
     Akış:
       1) /coffee/start -> reading_id (pending_payment)
-      2) /coffee/{id}/upload-images -> foto yükle (photos_uploaded)
+      2) /coffee/{id}/upload-images -> foto yükle (images_uploaded)
       3) Store ödeme -> /payments/intent + /payments/verify (paid)
       4) /coffee/{id}/generate -> yorum üret (processing -> completed)
     """
@@ -157,6 +158,7 @@ async def upload_images(
             detail="Lütfen yalnızca kahve fincanının iç kısmının fotoğrafını yükleyiniz.",
         )
 
+    # ✅ repo artık status'u images_uploaded yapıyor
     r2 = set_photos(session, reading_id, saved)
     return _to_schema(r2)
 
