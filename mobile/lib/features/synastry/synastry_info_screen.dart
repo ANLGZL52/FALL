@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 
 import '../../models/synastry_models.dart';
+import '../../services/device_id_service.dart'; // ✅ EKLE
 import '../../services/synastry_api.dart';
 import 'synastry_payment_screen.dart';
 
@@ -80,7 +81,10 @@ class _SynastryInfoScreenState extends State<SynastryInfoScreen> {
         question: _question.text.trim().isEmpty ? null : _question.text.trim(),
       );
 
-      final startRes = await _api.start(req);
+      // ✅ KRİTİK: deviceId üret ve header’a koy
+      final deviceId = await DeviceIdService.getOrCreate();
+
+      final startRes = await _api.start(req, deviceId: deviceId);
 
       if (!mounted) return;
       Navigator.pushReplacement(

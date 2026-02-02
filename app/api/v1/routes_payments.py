@@ -351,8 +351,8 @@ async def verify_payment(
             raise HTTPException(status_code=422, detail="receipt_data is required for app_store")
 
     # ✅ PRECONDITION CHECK (store verify’den ÖNCE)
-    # Yanlış sırada gelirse 409 döner; kullanıcı kart/foto adımını tamamlar.
-    _check_prerequisites(session=session, product=sku_info.product, reading_id=payment.reading_id)
+    # FIX-1: sku_info.product yerine payment.product ile kontrol
+    _check_prerequisites(session=session, product=payment.product, reading_id=payment.reading_id)
 
     # ✅ verified ise idempotent davran (ve unlock hata verse bile verify'yi fail etme)
     if payment.status == "verified":
@@ -363,15 +363,16 @@ async def verify_payment(
             )
 
         # 🔥 KRİTİK: verified olsa bile reading unlock değilse tekrar dene
-        # Ama burada hata alırsak verify akışını bozmayacağız.
+        # FIX-2: HTTPException değil, genel Exception yakala
         try:
             _unlock_reading_for_product(
                 session=session,
-                product=sku_info.product,
+                product=payment.product,
                 reading_id=payment.reading_id,
                 payment_ref=payment.id,
             )
-        except HTTPException:
+        except Exception:
+            # unlock başarısız olsa bile verify'yi bozma (idempotent)
             pass
 
         return PaymentVerifyResponse(ok=True, verified=True, payment_id=payment.id, status="verified")
@@ -412,7 +413,7 @@ async def verify_payment(
     # ------------------------------------------------------------
     _unlock_reading_for_product(
         session=session,
-        product=sku_info.product,
+        product=payment.product,
         reading_id=payment.reading_id,
         payment_ref=payment.id,
     )

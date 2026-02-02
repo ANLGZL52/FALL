@@ -26,6 +26,9 @@ class _SynastryPaymentScreenState extends State<SynastryPaymentScreen> {
   bool _loading = false;
   String? _lastPaymentId;
 
+  // sadece debug için: hangi device ile gidiyoruz gör
+  String? _deviceId;
+
   final String _sku = ProductCatalog.synastry149;
 
   // Debug'da store test etmek istersen true
@@ -43,12 +46,16 @@ class _SynastryPaymentScreenState extends State<SynastryPaymentScreen> {
     setState(() => _loading = true);
 
     try {
-      // header için device id üret
-      await DeviceIdService.getOrCreate();
+      // ✅ KRİTİK: device id’yi al ve sakla
+      final deviceId = await DeviceIdService.getOrCreate();
+      if (mounted) setState(() => _deviceId = deviceId);
 
       final shouldUseIap = kReleaseMode || debugUseStoreIap;
 
       if (shouldUseIap) {
+        // ✅ IapService’in verify çağrısı backend’e X-Device-Id göndermeli.
+        // IapService içinde ApiBase.headers(deviceId: deviceId) kullanmıyorsan,
+        // orayı da güncellememiz gerekir.
         final verify = await IapService.instance.buyAndVerify(
           readingId: widget.readingId,
           sku: _sku,
@@ -129,10 +136,18 @@ class _SynastryPaymentScreenState extends State<SynastryPaymentScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text("SKU: $_sku", style: const TextStyle(color: Colors.white70, fontSize: 12)),
+
                     if (_lastPaymentId != null) ...[
                       const SizedBox(height: 6),
                       Text("Son işlem: $_lastPaymentId", style: const TextStyle(color: Colors.white70, fontSize: 12)),
                     ],
+
+                    // sadece debug amaçlı
+                    if (!kReleaseMode && _deviceId != null) ...[
+                      const SizedBox(height: 6),
+                      Text("Device: $_deviceId", style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                    ],
+
                     if (!kReleaseMode) ...[
                       const SizedBox(height: 6),
                       Text(

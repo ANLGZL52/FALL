@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import uuid4
 
+from sqlalchemy import Column, Text
 from sqlmodel import SQLModel, Field
 
 
@@ -32,7 +33,9 @@ class NumerologyReadingDB(SQLModel, table=True):
 
     status: str = Field(default="started", index=True)
 
-    result_text: Optional[str] = Field(default=None)
+    # ✅ CRITICAL: uzun metin kesin TEXT olsun
+    result_text: Optional[str] = Field(default=None, sa_column=Column(Text))
+
     rating: Optional[int] = Field(default=None)
 
     is_paid: bool = Field(default=False, index=True)

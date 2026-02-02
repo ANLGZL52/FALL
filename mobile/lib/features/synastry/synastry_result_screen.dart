@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:open_filex/open_filex.dart';
 
+import '../../services/device_id_service.dart'; // ✅ EKLE
 import '../../services/synastry_api.dart';
 
 class SynastryResultScreen extends StatelessWidget {
@@ -19,7 +20,14 @@ class SynastryResultScreen extends StatelessWidget {
   Future<void> _downloadAndOpenPdf(BuildContext context) async {
     try {
       final api = SynastryApi();
-      final bytes = await api.downloadPdf(readingId);
+
+      // ✅ KRİTİK: device id al
+      final deviceId = await DeviceIdService.getOrCreate();
+
+      final bytes = await api.downloadPdf(
+        readingId,
+        deviceId: deviceId, // ✅ EKLE
+      );
 
       final dir = await getApplicationDocumentsDirectory();
       final file = File('${dir.path}/synastry_$readingId.pdf');

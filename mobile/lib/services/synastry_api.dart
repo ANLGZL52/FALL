@@ -17,20 +17,31 @@ String _extractErrorMessage(String body) {
   return body;
 }
 
+String _requireDeviceId(String? deviceId) {
+  final d = (deviceId ?? '').trim();
+  if (d.isEmpty || d.length < 8) {
+    // 🔥 UI deviceId göndermeyi unuttuysa burada patlasın
+    throw StateError('deviceId boş. X-Device-Id gönderilmeden istek atılamaz.');
+  }
+  return d;
+}
+
 class SynastryApi {
   static const Duration _defaultTimeout = Duration(seconds: 30);
   static const Duration _generateTimeout = Duration(seconds: 150);
 
   Future<SynastryStartResponse> start(
     SynastryStartRequest req, {
-    String? deviceId,
+    required String deviceId, // ✅ ZORUNLU
   }) async {
+    final d = _requireDeviceId(deviceId);
+
     final uri = Uri.parse('${ApiBase.baseUrl}/synastry/start');
 
     final res = await http
         .post(
           uri,
-          headers: ApiBase.headers(deviceId: deviceId),
+          headers: ApiBase.headers(deviceId: d),
           body: jsonEncode(req.toJson()),
         )
         .timeout(_defaultTimeout);
@@ -49,8 +60,10 @@ class SynastryApi {
   Future<void> markPaid(
     String id, {
     String? paymentRef,
-    String? deviceId,
+    required String deviceId, // ✅ ZORUNLU
   }) async {
+    final d = _requireDeviceId(deviceId);
+
     final ref = (paymentRef ?? '').trim();
     if (ref.isNotEmpty && !ref.startsWith("TEST-")) {
       throw Exception("markPaid legacy only. Real payments use /payments/verify.");
@@ -62,7 +75,7 @@ class SynastryApi {
     final res = await http
         .post(
           uri,
-          headers: ApiBase.headers(deviceId: deviceId),
+          headers: ApiBase.headers(deviceId: d),
           body: jsonEncode(body),
         )
         .timeout(_defaultTimeout);
@@ -76,14 +89,16 @@ class SynastryApi {
 
   Future<void> generate(
     String id, {
-    String? deviceId,
+    required String deviceId, // ✅ ZORUNLU
   }) async {
+    final d = _requireDeviceId(deviceId);
+
     final uri = Uri.parse('${ApiBase.baseUrl}/synastry/$id/generate');
 
     final res = await http
         .post(
           uri,
-          headers: ApiBase.headers(deviceId: deviceId),
+          headers: ApiBase.headers(deviceId: d),
         )
         .timeout(_generateTimeout);
 
@@ -96,14 +111,16 @@ class SynastryApi {
 
   Future<SynastryStatusResponse> getStatus(
     String id, {
-    String? deviceId,
+    required String deviceId, // ✅ ZORUNLU
   }) async {
+    final d = _requireDeviceId(deviceId);
+
     final uri = Uri.parse('${ApiBase.baseUrl}/synastry/$id');
 
     final res = await http
         .get(
           uri,
-          headers: ApiBase.headers(deviceId: deviceId),
+          headers: ApiBase.headers(deviceId: d),
         )
         .timeout(_defaultTimeout);
 
@@ -119,12 +136,14 @@ class SynastryApi {
 
   Future<Uint8List> downloadPdf(
     String id, {
-    String? deviceId,
+    required String deviceId, // ✅ ZORUNLU
   }) async {
+    final d = _requireDeviceId(deviceId);
+
     final uri = Uri.parse('${ApiBase.baseUrl}/synastry/$id/pdf');
 
     final res = await http
-        .get(uri, headers: ApiBase.headers(deviceId: deviceId))
+        .get(uri, headers: ApiBase.headers(deviceId: d))
         .timeout(_defaultTimeout);
 
     if (res.statusCode >= 400) {

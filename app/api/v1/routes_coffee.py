@@ -1,4 +1,3 @@
-# app/api/v1/routes_coffee.py
 from __future__ import annotations
 
 import os
@@ -28,43 +27,32 @@ from app.schemas.coffee import CoffeeStartRequest, CoffeeReading
 router = APIRouter(prefix="/coffee", tags=["coffee"])
 
 
-class MarkPaidRequest(BaseModel):
-    payment_ref: Optional[str] = None
-
-
 class RatingRequest(BaseModel):
     rating: int
 
 
-def _get_or_404_owner(session: Session, reading_id: str, device_id: str) -> CoffeeReadingDB:
-    """
-    ✅ Ownership check: sadece aynı cihaz bu reading'e erişebilir.
-    """
+def _get_or_404_owner(
+    session: Session, reading_id: str, device_id: str
+) -> CoffeeReadingDB:
     r = get_reading(session, reading_id)
     if not r:
         raise HTTPException(status_code=404, detail="Reading not found")
 
-    rid = (getattr(r, "device_id", None) or "").strip()
-
-    # Eğer kayıt device_id ile kilitliyse ve farklı cihazsa => 404
+    rid = (r.device_id or "").strip()
     if rid and rid != device_id:
         raise HTTPException(status_code=404, detail="Reading not found")
 
-    # Legacy: device_id boşsa ilk erişimde bağla
     if not rid:
-        try:
-            setattr(r, "device_id", device_id)
-            r.updated_at = datetime.utcnow()
-            update_reading(session, r)
-        except Exception:
-            pass
+        r.device_id = device_id
+        r.updated_at = datetime.utcnow()
+        update_reading(session, r)
 
     return r
 
 
 def _to_schema(r: CoffeeReadingDB) -> CoffeeReading:
     photos = list_photos(r)
-    result = getattr(r, "result_text", None)
+    result = r.result_text
 
     return CoffeeReading(
         id=r.id,
@@ -73,7 +61,7 @@ def _to_schema(r: CoffeeReadingDB) -> CoffeeReading:
         name=r.name,
         age=r.age,
         photos=photos,
-        status=r.status,                 # ✅ schema ile uyumlu olmak zorunda
+        status=r.status,
         comment=result,
         result_text=result,
         rating=r.rating,
@@ -92,19 +80,15 @@ def _delete_paths(paths: List[str]) -> None:
             pass
 
 
+# --------------------------------------------------
+# START
+# --------------------------------------------------
 @router.post("/start", response_model=CoffeeReading)
 async def start(
     req: CoffeeStartRequest,
     session: Session = Depends(get_session),
     device_id: str = Depends(get_device_id),
 ):
-    """
-    Akış:
-      1) /coffee/start -> reading (pending_payment)
-      2) /coffee/{id}/upload-images -> foto yükle (photos_uploaded)
-      3) Store ödeme -> /payments/intent + /payments/verify (paid)
-      4) /coffee/{id}/generate -> yorum üret (processing -> completed)
-    """
     db_obj = CoffeeReadingDB(
         topic=req.topic,
         question=req.question,
@@ -112,23 +96,19 @@ async def start(
         age=req.age,
         status="pending_payment",
         is_paid=False,
-        payment_ref=None,
-        result_text=None,
         images_json="[]",
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
+        device_id=device_id,
     )
-
-    try:
-        setattr(db_obj, "device_id", device_id)
-    except Exception:
-        pass
 
     db_obj = create_reading(session, db_obj)
     return _to_schema(db_obj)
 
 
-@router.post("/{reading_id}/upload", response_model=CoffeeReading)
+# --------------------------------------------------
+# UPLOAD IMAGES
+# --------------------------------------------------
 @router.post("/{reading_id}/upload-images", response_model=CoffeeReading)
 async def upload_images(
     reading_id: str,
@@ -136,66 +116,35 @@ async def upload_images(
     session: Session = Depends(get_session),
     device_id: str = Depends(get_device_id),
 ):
-    _get_or_404_owner(session, reading_id, device_id)
+    r = _get_or_404_owner(session, reading_id, device_id)
 
     if len(files) < settings.min_photos or len(files) > settings.max_photos:
         raise HTTPException(
             status_code=400,
-            detail=f"Foto sayısı {settings.min_photos}-{settings.max_photos} aralığında olmalı.",
+            detail=f"Foto sayısı {settings.min_photos}-{settings.max_photos} olmalı.",
         )
 
     saved = await save_uploads(reading_id, files)
 
-    # ✅ Kahve fincan içi değilse: ödeme adımına geçmesin
     verdict = validate_coffee_images(saved)
-    if not verdict.get("ok", False):
+    if not verdict.get("ok"):
         _delete_paths(saved)
         raise HTTPException(
             status_code=400,
-            detail="Lütfen yalnızca kahve fincanının iç kısmının fotoğrafını yükleyiniz.",
+            detail="Lütfen sadece kahve fincanı içi fotoğrafı yükleyin.",
         )
 
-    # ✅ repo status'u photos_uploaded yapıyor
-    r2 = set_photos(session, reading_id, saved)
-    return _to_schema(r2)
-
-
-@router.post("/{reading_id}/mark-paid", response_model=CoffeeReading)
-async def mark_paid(
-    reading_id: str,
-    body: MarkPaidRequest,
-    session: Session = Depends(get_session),
-    device_id: str = Depends(get_device_id),
-):
-    """
-    ✅ Legacy/mock akış (TEST-...).
-    Real ödeme: /payments/verify.
-    """
-    r = _get_or_404_owner(session, reading_id, device_id)
-
-    if not list_photos(r):
-        raise HTTPException(status_code=400, detail="Ödeme için önce fotoğraf yüklemelisin.")
-
-    if not body.payment_ref:
-        raise HTTPException(status_code=422, detail="payment_ref is required")
-
-    if not str(body.payment_ref).startswith("TEST-"):
-        raise HTTPException(
-            status_code=403,
-            detail="mark-paid is legacy only. Use /payments/verify for real payments.",
-        )
-
-    if r.is_paid and r.payment_ref:
-        return _to_schema(r)
-
-    r.is_paid = True
-    r.payment_ref = body.payment_ref
-    r.status = "paid"
+    r = set_photos(session, reading_id, saved)
+    r.status = "photos_uploaded"
     r.updated_at = datetime.utcnow()
     r = update_reading(session, r)
+
     return _to_schema(r)
 
 
+# --------------------------------------------------
+# GENERATE
+# --------------------------------------------------
 @router.post("/{reading_id}/generate", response_model=CoffeeReading)
 async def generate(
     reading_id: str,
@@ -206,63 +155,51 @@ async def generate(
 
     photos = list_photos(r)
     if not photos:
-        raise HTTPException(status_code=400, detail="No photos uploaded")
+        raise HTTPException(status_code=400, detail="Fotoğraf yüklenmedi")
 
     if not r.is_paid:
         raise HTTPException(status_code=402, detail="Payment Required")
 
-    status = (r.status or "").lower().strip()
-    result_text = (getattr(r, "result_text", None) or "").strip()
-
-    if result_text:
+    if r.result_text:
         return _to_schema(r)
 
-    if status == "processing":
+    if r.status == "processing":
         return _to_schema(r)
 
-    # ✅ generate öncesi de doğrula (ek güvenlik)
     verdict = validate_coffee_images(photos)
-    if not verdict.get("ok", False):
+    if not verdict.get("ok"):
         raise HTTPException(
             status_code=400,
-            detail="Lütfen yalnızca kahve fincanının iç kısmının fotoğrafını yükleyiniz.",
+            detail="Lütfen sadece kahve fincanı içi fotoğrafı yükleyin.",
         )
 
     set_status(session, reading_id, "processing")
 
     try:
-        comment = generate_fortune(
+        text = generate_fortune(
             name=r.name,
             topic=r.topic,
             question=r.question,
             image_paths=photos,
-        )
-        comment = (comment or "").strip()
+        ).strip()
 
-        if comment == "Görseller kahve fincanı içi görünmüyor.":
-            set_status(session, reading_id, "paid", comment=None)
-            raise HTTPException(
-                status_code=400,
-                detail="Lütfen yalnızca kahve fincanının iç kısmının fotoğrafını yükleyiniz.",
-            )
+        if not text:
+            raise RuntimeError("Boş sonuç")
 
-        if not comment:
-            set_status(session, reading_id, "paid", comment=None)
-            raise HTTPException(status_code=500, detail="Yorum üretilemedi (boş sonuç).")
+        r = set_status(session, reading_id, "completed", comment=text)
+        return _to_schema(r)
 
-        r2 = set_status(session, reading_id, "completed", comment=comment)
-        return _to_schema(r2)
-
-    except HTTPException:
-        raise
     except Exception as e:
-        try:
-            set_status(session, reading_id, "paid", comment=None)
-        except Exception:
-            pass
-        raise HTTPException(status_code=500, detail=f"Kahve falı yorum üretilemedi: {e}")
+        set_status(session, reading_id, "paid")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Kahve falı üretilemedi: {e}",
+        )
 
 
+# --------------------------------------------------
+# DETAIL
+# --------------------------------------------------
 @router.get("/{reading_id}", response_model=CoffeeReading)
 async def detail(
     reading_id: str,
@@ -273,6 +210,9 @@ async def detail(
     return _to_schema(r)
 
 
+# --------------------------------------------------
+# RATE
+# --------------------------------------------------
 @router.post("/{reading_id}/rate", response_model=CoffeeReading)
 async def rate(
     reading_id: str,
@@ -281,8 +221,9 @@ async def rate(
     device_id: str = Depends(get_device_id),
 ):
     r = _get_or_404_owner(session, reading_id, device_id)
-    if req.rating < 1 or req.rating > 5:
-        raise HTTPException(status_code=400, detail="Rating must be 1..5")
+    if not (1 <= req.rating <= 5):
+        raise HTTPException(status_code=400, detail="Rating 1-5 arası olmalı")
+
     r.rating = req.rating
     r.updated_at = datetime.utcnow()
     r = update_reading(session, r)

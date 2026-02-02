@@ -25,6 +25,7 @@ class _HandScreenState extends State<HandScreen> {
   final _nameController = TextEditingController();
   final _ageController = TextEditingController();
 
+  // UI'da kalsın istiyorsan saklayabiliriz, ama şu an API'ye göndermiyoruz (compile fix)
   String? _dominantHand; // right/left
   String? _photoHand; // right/left
 
@@ -32,6 +33,10 @@ class _HandScreenState extends State<HandScreen> {
   final List<File> _photos = [];
 
   bool _loading = false;
+
+  // ✅ Backend ile uyumlu: settings.min_photos=3, max_photos=5
+  static const int _minPhotos = 3;
+  static const int _maxPhotos = 5;
 
   @override
   void dispose() {
@@ -48,16 +53,17 @@ class _HandScreenState extends State<HandScreen> {
 
     setState(() {
       for (final x in picked) {
-        if (_photos.length >= 3) break;
+        if (_photos.length >= _maxPhotos) break;
         _photos.add(File(x.path));
       }
     });
   }
 
   Future<void> _pickFromCamera() async {
-    if (_photos.length >= 3) return;
+    if (_photos.length >= _maxPhotos) return;
     final picked = await _picker.pickImage(source: ImageSource.camera, imageQuality: 88);
     if (picked == null) return;
+
     setState(() => _photos.add(File(picked.path)));
   }
 
@@ -66,9 +72,9 @@ class _HandScreenState extends State<HandScreen> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
-    if (_photos.length < 1 || _photos.length > 3) {
+    if (_photos.length < _minPhotos || _photos.length > _maxPhotos) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Lütfen 1 ile 3 el fotoğrafı ekle.')),
+        SnackBar(content: Text('Lütfen $_minPhotos ile $_maxPhotos arası el fotoğrafı ekle.')),
       );
       return;
     }
@@ -79,22 +85,20 @@ class _HandScreenState extends State<HandScreen> {
       // ✅ device id tek sefer al, tüm çağrılarda kullan
       final deviceId = await DeviceIdService.getOrCreate();
 
-      // 1) start
+      // 1) start  (dominantHand/photoHand şu an API'de yok → kaldırıldı)
       final HandReading reading = await HandApi.start(
+        deviceId: deviceId,
         name: _nameController.text.trim(),
         age: int.tryParse(_ageController.text.trim()),
         topic: _topicController.text.trim(),
         question: _questionController.text.trim(),
-        dominantHand: _dominantHand,
-        photoHand: _photoHand,
-        deviceId: deviceId,
       );
 
       // 2) upload (backend validasyon burada patlayabilir)
       await HandApi.uploadImages(
-        readingId: reading.id,
-        files: _photos,
         deviceId: deviceId,
+        readingId: reading.id,
+        imageFiles: _photos, // ✅ files: değil!
       );
 
       if (!mounted) return;
@@ -105,7 +109,9 @@ class _HandScreenState extends State<HandScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Hata: $e')),
+      );
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -119,7 +125,7 @@ class _HandScreenState extends State<HandScreen> {
             Icon(Icons.pan_tool_alt_outlined, size: 44, color: Colors.white),
             SizedBox(height: 10),
             Text(
-              '1-3 foto ekle:\n(avuç içi net, ışık iyi, çizgiler görünür)',
+              '3-5 foto ekle:\n(avuç içi net, ışık iyi, çizgiler görünür)',
               textAlign: TextAlign.center,
             ),
           ],
@@ -143,7 +149,12 @@ class _HandScreenState extends State<HandScreen> {
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(12),
-                child: Image.file(_photos[i], fit: BoxFit.cover, width: double.infinity, height: double.infinity),
+                child: Image.file(
+                  _photos[i],
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                  height: double.infinity,
+                ),
               ),
               Positioned(
                 right: 4,
@@ -168,11 +179,12 @@ class _HandScreenState extends State<HandScreen> {
   }
 
   Widget _handPickers() {
+    // UI'da kalsın (ileride backend'e ekleriz), ama şu an kullanılmıyor.
     return GlassCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('El Bilgisi (yorum kalitesi için)', style: TextStyle(fontWeight: FontWeight.w700)),
+          const Text('El Bilgisi (opsiyonel)', style: TextStyle(fontWeight: FontWeight.w700)),
           const SizedBox(height: 10),
           Row(
             children: [
@@ -200,6 +212,11 @@ class _HandScreenState extends State<HandScreen> {
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Not: Şu an bu alanlar backend’e gönderilmiyor. İstersen bir sonraki adımda API’ye ekleyelim.',
+            style: TextStyle(fontSize: 11, color: Colors.white.withOpacity(0.65), height: 1.2),
           ),
         ],
       ),
@@ -236,6 +253,11 @@ class _HandScreenState extends State<HandScreen> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Seçilen foto: ${_photos.length}/$_maxPhotos (min $_minPhotos)',
+              style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 12),
             ),
             const SizedBox(height: 18),
             _handPickers(),

@@ -6,7 +6,7 @@ from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
 
-from app.core.device import get_device_id  # ✅ NEW
+from app.core.device import get_device_id
 from app.db import get_session
 from app.schemas.numerology import NumerologyStartIn, NumerologyReadingOut, MarkPaidIn
 from app.repositories.numerology_repo import NumerologyRepo
@@ -31,12 +31,8 @@ def _as_dict(obj: Any) -> Dict[str, Any]:
     # pydantic v1
     if hasattr(obj, "dict"):
         return obj.dict()
-    # sqlmodel / orm
+
     d = {}
-    for k in dir(obj):
-        if k.startswith("_"):
-            continue
-        # sadece bildiğimiz alanları çekelim (güvenli)
     for k in [
         "id",
         "topic",
@@ -60,8 +56,6 @@ def _as_dict(obj: Any) -> Dict[str, Any]:
 def _require_owner(obj: Any, device_id: str) -> Dict[str, Any]:
     d = _as_dict(obj)
     stored = (d.get("device_id") or "").strip()
-    # Eğer stored boşsa (eski kayıtlar) burada bloklamıyoruz.
-    # Ama stored dolu ve farklıysa 404 döndür (güvenlik).
     if stored and stored != device_id:
         raise HTTPException(status_code=404, detail="Numerology kaydı bulunamadı.")
     return d
@@ -71,7 +65,7 @@ def _require_owner(obj: Any, device_id: str) -> Dict[str, Any]:
 def start(
     payload: NumerologyStartIn,
     session: Session = Depends(get_session),
-    device_id: str = Depends(get_device_id),  # ✅ NEW
+    device_id: str = Depends(get_device_id),
 ):
     """
     Numerology akışı:
@@ -86,11 +80,10 @@ def start(
             birth_date=payload.birth_date,
             topic=payload.topic,
             question=payload.question,
-            device_id=device_id,  # ✅ NEW (repo buna göre güncellenecek)
+            device_id=device_id,
         )
         if not created:
             raise HTTPException(status_code=500, detail="Numerology kayıt oluşturulamadı.")
-        # owner check (created eski repoda device yazmıyorsa sorun etmez)
         _require_owner(created, device_id)
         return created
     except HTTPException:
@@ -103,7 +96,7 @@ def start(
 def get_reading(
     reading_id: str,
     session: Session = Depends(get_session),
-    device_id: str = Depends(get_device_id),  # ✅ NEW
+    device_id: str = Depends(get_device_id),
 ):
     obj = _repo.get(session=session, reading_id=reading_id)
     if not obj:
@@ -117,7 +110,7 @@ def mark_paid(
     reading_id: str,
     payload: MarkPaidIn,
     session: Session = Depends(get_session),
-    device_id: str = Depends(get_device_id),  # ✅ NEW
+    device_id: str = Depends(get_device_id),
 ):
     """
     ✅ Legacy/mock akış bozulmasın diye endpoint duruyor.
@@ -148,7 +141,7 @@ def mark_paid(
 def generate(
     reading_id: str,
     session: Session = Depends(get_session),
-    device_id: str = Depends(get_device_id),  # ✅ NEW
+    device_id: str = Depends(get_device_id),
 ):
     obj = _repo.get(session=session, reading_id=reading_id)
     if not obj:
@@ -156,7 +149,6 @@ def generate(
 
     d = _require_owner(obj, device_id)
 
-    # 🔒 Ödeme zorunlu (robust)
     is_paid = bool(d.get("is_paid", False))
     if not is_paid:
         raise HTTPException(status_code=402, detail="Payment Required")
@@ -164,22 +156,18 @@ def generate(
     status = (d.get("status") or "").lower().strip()
     result_text = (d.get("result_text") or "").strip()
 
-    # ✅ idempotent: sonuç varsa direkt dön (status ne olursa olsun)
     if result_text:
         return obj
 
-    # ✅ processing ise tekrar üretme
     if status == "processing":
         return obj
 
-    # ✅ status standardı: paid -> processing -> completed
     if status not in ("paid", "processing", "completed"):
         _repo.set_status(session=session, reading_id=reading_id, status="paid")
         obj = _repo.get(session=session, reading_id=reading_id) or obj
         d = _as_dict(obj)
         status = (d.get("status") or "").lower().strip()
 
-    # ✅ processing’e çek (generate kilidi)
     _repo.set_status(session=session, reading_id=reading_id, status="processing")
 
     try:
@@ -199,7 +187,6 @@ def generate(
             _repo.set_status(session=session, reading_id=reading_id, status="paid")
             raise HTTPException(status_code=500, detail="AI sonucu DB'ye yazılamadı.")
 
-        # ✅ completed standardı
         try:
             _repo.set_status(session=session, reading_id=reading_id, status="completed")
         except Exception:

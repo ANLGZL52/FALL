@@ -1,3 +1,4 @@
+// mobile/lib/features/hand/hand_payment_screen.dart
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -23,20 +24,23 @@ class _HandPaymentScreenState extends State<HandPaymentScreen> {
   bool _loading = false;
   String? _lastPaymentId;
 
-  // ✅ Debug modda da store akışını test etmek istersen true
+  // ✅ Debug modda store akışını test etmek istersen true
   static const bool debugUseStoreIap = false;
 
   Future<void> _pay() async {
     setState(() => _loading = true);
     try {
+      // ✅ cihaz id hazır olsun
       await DeviceIdService.getOrCreate();
 
       final shouldUseIap = kReleaseMode || debugUseStoreIap;
+
       if (shouldUseIap) {
         final verify = await IapService.instance.buyAndVerify(
           readingId: widget.readingId,
           sku: ProductCatalog.hand39,
         );
+
         if (!verify.verified) {
           throw Exception("Ödeme doğrulanamadı: ${verify.status}");
         }
@@ -44,11 +48,13 @@ class _HandPaymentScreenState extends State<HandPaymentScreen> {
         if (mounted) setState(() => _lastPaymentId = verify.paymentId);
       }
 
-      // ✅ ödeme sonrası generate burada YOK.
-      // Generate işlemini Loading ekranı retry/backoff ile yapacak.
       if (!mounted) return;
+
+      // ✅ ödeme sonrası generate burada yok -> Loading ekranı yapacak
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => HandLoadingScreen(readingId: widget.readingId)),
+        MaterialPageRoute(
+          builder: (_) => HandLoadingScreen(readingId: widget.readingId),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
@@ -74,13 +80,19 @@ class _HandPaymentScreenState extends State<HandPaymentScreen> {
                 children: [
                   const Text('El Falı', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
                   const SizedBox(height: 10),
-                  const Text('Avucundaki çizgiler, karakterin ve yolun hakkında küçük ipuçları taşır.\nŞimdi yorumlayalım.'),
+                  const Text(
+                    'Avucundaki çizgiler, karakterin ve yolun hakkında küçük ipuçları taşır.\nŞimdi yorumlayalım.',
+                  ),
                   const SizedBox(height: 12),
                   const Text('Tutar: 39 ₺', style: TextStyle(fontWeight: FontWeight.w800)),
                   const SizedBox(height: 4),
                   Text(
                     '+ vergiler',
-                    style: TextStyle(color: Colors.white.withOpacity(0.78), fontSize: 12, fontWeight: FontWeight.w800),
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.78),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   Text(

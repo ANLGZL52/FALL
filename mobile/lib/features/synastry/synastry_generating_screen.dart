@@ -1,3 +1,4 @@
+// lib/features/synastry/synastry_generating_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 
@@ -20,7 +21,8 @@ class _SynastryGeneratingScreenState extends State<SynastryGeneratingScreen> {
   String _status = 'processing';
   String? _error;
 
-  String? _deviceId;
+  // ✅ NULL OLMASIN: artık güvenle her yerde kullanacağız
+  late final String _deviceId;
 
   bool _generateTriggered = false;
   bool _generateInFlight = false;
@@ -65,6 +67,7 @@ class _SynastryGeneratingScreenState extends State<SynastryGeneratingScreen> {
 
   Future<void> _start() async {
     try {
+      // ✅ burada kesin alıyoruz
       _deviceId = await DeviceIdService.getOrCreate();
 
       _timer?.cancel();
@@ -94,7 +97,10 @@ class _SynastryGeneratingScreenState extends State<SynastryGeneratingScreen> {
 
     for (var i = 1; i <= maxTry; i++) {
       try {
-        await _api.generate(widget.readingId, deviceId: _deviceId);
+        await _api.generate(
+          widget.readingId,
+          deviceId: _deviceId, // ✅ artık non-null
+        );
         _generateInFlight = false;
         return;
       } catch (e) {
@@ -109,7 +115,7 @@ class _SynastryGeneratingScreenState extends State<SynastryGeneratingScreen> {
           // UI spam olmasın: sadece 1 ve 3. denemede minik bilgi
           if (i == 1 || i == 3) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
+              const SnackBar(
                 content: Text("Analiz başlatılıyor… (tekrar deniyorum)"),
                 behavior: SnackBarBehavior.floating,
               ),
@@ -137,7 +143,10 @@ class _SynastryGeneratingScreenState extends State<SynastryGeneratingScreen> {
     _elapsed += _pollSec;
 
     try {
-      final s = await _api.getStatus(widget.readingId, deviceId: _deviceId);
+      final s = await _api.getStatus(
+        widget.readingId,
+        deviceId: _deviceId, // ✅ artık non-null
+      );
 
       if (!mounted) return;
 
@@ -180,7 +189,6 @@ class _SynastryGeneratingScreenState extends State<SynastryGeneratingScreen> {
 
       if (shouldTriggerGenerate && (!_generateTriggered || cameBackToPaid)) {
         _generateTriggered = true;
-        // generate artık safe retry ile
         await _triggerGenerateSafely();
       }
 
@@ -188,7 +196,6 @@ class _SynastryGeneratingScreenState extends State<SynastryGeneratingScreen> {
     } catch (e) {
       if (!mounted) return;
 
-      // poll’da hata: kullanıcıya göster ama “retry” ile tekrar başlatabilsin
       setState(() {
         _status = 'error';
         _error = e.toString();

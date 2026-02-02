@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 from datetime import date, timedelta
 from typing import List, Dict, Any, Optional
 
@@ -208,6 +209,90 @@ def call_openai_text(*, system: str, user: str, max_output_tokens: Optional[int]
     out = (resp.output_text or "").strip()
     if not out:
         raise RuntimeError("OpenAI boş yanıt döndü. (output_text empty)")
+    return out
+
+
+# ============================================================
+# ✅ Truncation Guard (Numerology fix)
+# ============================================================
+
+_SENTENCE_END_RE = re.compile(r"[.!?…]\s*$")
+
+
+def _looks_truncated(text: str) -> bool:
+    """
+    Çok basit ama pratik bir heuristik:
+    - çok kısa
+    - cümle noktalama ile bitmiyor
+    - açıkça yarım bırakılmış gibi (son karakter virgül, iki nokta vb.)
+    """
+    t = (text or "").strip()
+    if not t:
+        return True
+    if len(t) < 300:
+        return True
+
+    last = t[-1]
+    if last in {",", ":", ";", "-", "(", "["}:
+        return True
+
+    if not _SENTENCE_END_RE.search(t):
+        return True
+
+    return False
+
+
+def _numerology_continue_user(prev_text: str) -> str:
+    """
+    Devam prompt’u: tekrar etmesin, kaldığı yerden tamamlasın.
+    """
+    return f"""
+Aşağıdaki numeroloji metni daha önce üretildi ancak muhtemelen YARIM kaldı.
+Görev:
+- KALDIĞIN YERDEN devam et.
+- Önceki cümleleri tekrar ETME.
+- Metni düzgün bir sonuç paragrafı ile bitir.
+- En sonda 14 günlük plan zaten yazıldıysa tekrar yazma; yazılmadıysa ekle.
+- Mutlaka TAMAMLanmış cümle ile bitir (sonu nokta olsun).
+
+[ŞU ANA KADARKİ METİN]
+{prev_text}
+
+DEVAM:
+""".strip()
+
+
+def _stitch_with_guard(
+    *,
+    system: str,
+    initial_user: str,
+    initial_tokens: int,
+    continue_tokens: int,
+    max_hops: int = 2,
+) -> str:
+    """
+    1) ilk üret
+    2) yarım görünüyorsa 1-2 kez "devam et" çağır
+    3) birleştir ve dön
+    """
+    out = call_openai_text(system=system, user=initial_user, max_output_tokens=initial_tokens).strip()
+
+    for _ in range(max_hops):
+        if not _looks_truncated(out):
+            break
+
+        cont_user = _numerology_continue_user(out)
+        nxt = call_openai_text(system=system, user=cont_user, max_output_tokens=continue_tokens).strip()
+        if not nxt:
+            break
+
+        # basit birleştirme
+        if not out.endswith("\n"):
+            out += "\n\n"
+        out += nxt
+
+    # Final temizlik: çok aşırı boşlukları sadeleştir
+    out = re.sub(r"\n{3,}", "\n\n", out).strip()
     return out
 
 
@@ -503,7 +588,7 @@ def generate_tarot_reading(
 
 
 # ============================================================
-# Numerology (text-only)
+# ✅ Numerology (text-only)  <-- FIX HERE
 # ============================================================
 
 def generate_numerology_reading(
@@ -532,7 +617,8 @@ def generate_numerology_reading(
         "- Kullanıcının sorusuna en az 4 paragraf direkt cevap ver.\n"
         "- Sonda tek paragrafta: 14 günlük mini plan (BUGÜNDEN başlayarak tarihli).\n"
         "- Tarihler sabit/örnek olmayacak.\n"
-        "- Uzunluk: en az 1800 kelime.\n"
+        "- Uzunluk: en az 1800 kelime hedefle.\n"
+        "- Metni mutlaka tamamlanmış bir cümleyle bitir (sonu nokta olsun).\n"
     )
 
     user = f"""
@@ -550,7 +636,18 @@ Kullanıcı:
 Bu verilerle çok kapsamlı ve derin bir numeroloji analizi yaz.
 """.strip()
 
-    return call_openai_text(system=system, user=user, max_output_tokens=_max_output_tokens(3600))
+    # ✅ İlk çağrı için yüksek token (ama env clamp var)
+    # ✅ Devam çağrıları daha küçük token ile tamamlar
+    initial_tokens = _max_output_tokens(4200)
+    continue_tokens = _max_output_tokens(1800)
+
+    return _stitch_with_guard(
+        system=system,
+        initial_user=user,
+        initial_tokens=initial_tokens,
+        continue_tokens=continue_tokens,
+        max_hops=2,
+    )
 
 
 # ============================================================
