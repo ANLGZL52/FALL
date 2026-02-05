@@ -4,6 +4,7 @@ import '../../services/device_id_service.dart';
 import '../../services/numerology_api.dart';
 import '../../models/numerology_reading.dart';
 import '../../widgets/mystic_scaffold.dart';
+import '../../services/profile_store.dart';
 
 import 'numerology_payment_screen.dart';
 
@@ -22,6 +23,13 @@ class _NumerologyFormScreenState extends State<NumerologyFormScreen> {
 
   bool _loading = false;
 
+  // ✅ Profil ile otomatik doldurma kontrolü
+  bool _useProfile = true;
+  bool _prefilledOnce = false;
+
+  // ✅ Profil değişince güncellemek için snapshot
+  String _lastProfileSig = "";
+
   void _toast(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -30,6 +38,57 @@ class _NumerologyFormScreenState extends State<NumerologyFormScreen> {
         margin: const EdgeInsets.fromLTRB(18, 0, 18, 90),
       ),
     );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _boot();
+  }
+
+  Future<void> _boot() async {
+    // store init (local + server sync)
+    await ProfileStore.instance.init(alsoSyncServer: true);
+
+    // ilk açılışta profil doluysa alanlara bas
+    _applyProfileIfNeeded();
+
+    // store değişince tekrar dene (ama kullanıcı yazdığını ezme kuralı korunur)
+    ProfileStore.instance.addListener(_onProfileChanged);
+  }
+
+  void _onProfileChanged() {
+    if (!mounted) return;
+    _applyProfileIfNeeded();
+  }
+
+  void _applyProfileIfNeeded() {
+    if (!_useProfile) return;
+
+    final me = ProfileStore.instance.me;
+    if (me == null) return;
+
+    // ✅ profil değiştiyse tekrar prefill et (değişmediyse ve bir kez yaptıysak dokunma)
+    final sig = "${me.displayName}|${me.birthDate}|${me.birthTime}|${me.birthPlace}";
+    if (_prefilledOnce && _lastProfileSig == sig) return;
+    _lastProfileSig = sig;
+
+    final name = me.displayName.trim();
+    final bd = (me.birthDate ?? '').trim();
+
+    // sadece boşsa doldur (kullanıcının yazdığını ezmeyelim)
+    if (_nameCtrl.text.trim().isEmpty && name.isNotEmpty && name != 'Misafir') {
+      _nameCtrl.text = name;
+    }
+    if (_birthDateCtrl.text.trim().isEmpty && bd.isNotEmpty) {
+      _birthDateCtrl.text = bd;
+    }
+
+    // prefill yapıldı sayalım
+    if (_nameCtrl.text.trim().isNotEmpty || _birthDateCtrl.text.trim().isNotEmpty) {
+      _prefilledOnce = true;
+      if (mounted) setState(() {});
+    }
   }
 
   Future<void> _pickBirthDate() async {
@@ -60,6 +119,22 @@ class _NumerologyFormScreenState extends State<NumerologyFormScreen> {
     }
   }
 
+  void _setUseProfile(bool v) {
+    setState(() {
+      _useProfile = v;
+      if (_useProfile) {
+        // yeniden prefille izin ver
+        _prefilledOnce = false;
+        _lastProfileSig = "";
+        _applyProfileIfNeeded();
+      } else {
+        // başkası için hızlı temizle
+        _nameCtrl.clear();
+        _birthDateCtrl.clear();
+      }
+    });
+  }
+
   Future<void> _continueToPayment() async {
     final name = _nameCtrl.text.trim();
     final birthDate = _birthDateCtrl.text.trim();
@@ -85,7 +160,6 @@ class _NumerologyFormScreenState extends State<NumerologyFormScreen> {
 
       if (!mounted) return;
 
-      // ✅ ÖNCE ÖDEME
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => NumerologyPaymentScreen(
@@ -106,6 +180,8 @@ class _NumerologyFormScreenState extends State<NumerologyFormScreen> {
 
   @override
   void dispose() {
+    ProfileStore.instance.removeListener(_onProfileChanged);
+
     _nameCtrl.dispose();
     _birthDateCtrl.dispose();
     _topicCtrl.dispose();
@@ -123,6 +199,32 @@ class _NumerologyFormScreenState extends State<NumerologyFormScreen> {
         border: Border.all(color: Colors.white12),
       ),
       child: child,
+    );
+  }
+
+  Widget _profileToggle() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.30),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              "Profil bilgilerimi kullan",
+              style: TextStyle(color: Colors.white.withOpacity(0.88), fontWeight: FontWeight.w800),
+            ),
+          ),
+          Switch(
+            value: _useProfile,
+            onChanged: _setUseProfile,
+            activeColor: const Color(0xFFF5C361),
+          ),
+        ],
+      ),
     );
   }
 
@@ -155,6 +257,9 @@ class _NumerologyFormScreenState extends State<NumerologyFormScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    _profileToggle(),
+                    const SizedBox(height: 12),
+
                     const Text(
                       "Gerekli Bilgiler",
                       style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w900),

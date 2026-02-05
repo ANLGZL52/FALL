@@ -1,11 +1,13 @@
 // mobile/lib/features/hand/hand_screen.dart
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../models/hand_reading.dart';
 import '../../services/device_id_service.dart';
 import '../../services/hand_api.dart';
+import '../../services/profile_store.dart';
 import '../../widgets/glass_card.dart';
 import '../../widgets/gradient_button.dart';
 import '../../widgets/mystic_scaffold.dart';
@@ -25,7 +27,7 @@ class _HandScreenState extends State<HandScreen> {
   final _nameController = TextEditingController();
   final _ageController = TextEditingController();
 
-  // UI'da kalsın istiyorsan saklayabiliriz, ama şu an API'ye göndermiyoruz (compile fix)
+  // UI'da kalsın istiyorsan saklayabiliriz, ama şu an API'ye göndermiyoruz
   String? _dominantHand; // right/left
   String? _photoHand; // right/left
 
@@ -34,9 +36,34 @@ class _HandScreenState extends State<HandScreen> {
 
   bool _loading = false;
 
+  // ✅ Profil otomatik doldurma kontrolü
+  bool _applyingProfile = false;
+  bool _nameTouched = false;
+  bool _ageTouched = false;
+
   // ✅ Backend ile uyumlu: settings.min_photos=3, max_photos=5
   static const int _minPhotos = 3;
   static const int _maxPhotos = 5;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // Kullanıcı yazdı mı takibi
+    _nameController.addListener(() {
+      if (_applyingProfile) return;
+      _nameTouched = true;
+    });
+    _ageController.addListener(() {
+      if (_applyingProfile) return;
+      _ageTouched = true;
+    });
+
+    // Profil -> form otomatik dolsun
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _bootstrapProfile();
+    });
+  }
 
   @override
   void dispose() {
@@ -45,6 +72,69 @@ class _HandScreenState extends State<HandScreen> {
     _nameController.dispose();
     _ageController.dispose();
     super.dispose();
+  }
+
+  int? _ageFromBirthDate(String? birthDate) {
+    final s = (birthDate ?? '').trim();
+    if (s.isEmpty) return null;
+    // YYYY-MM-DD
+    final parts = s.split('-');
+    if (parts.length != 3) return null;
+    final y = int.tryParse(parts[0]);
+    final m = int.tryParse(parts[1]);
+    final d = int.tryParse(parts[2]);
+    if (y == null || m == null || d == null) return null;
+
+    final now = DateTime.now();
+    var age = now.year - y;
+    final hadBirthdayThisYear = (now.month > m) || (now.month == m && now.day >= d);
+    if (!hadBirthdayThisYear) age -= 1;
+
+    if (age < 0 || age > 120) return null;
+    return age;
+  }
+
+  Future<void> _bootstrapProfile() async {
+    if (!mounted) return;
+
+    // ✅ listener’ların “touched” yazmaması için setState ile bayrak
+    setState(() => _applyingProfile = true);
+
+    try {
+      // 1) Local hızlı yükle (init içi)
+      await ProfileStore.instance.init(alsoSyncServer: true);
+
+      // 2) Eğer server’dan “Misafir” yerine gerçek veri geldiyse,
+      // refresh sonrası tekrar apply etmek bazen iş görüyor.
+      // (ProfileStore init içinde zaten silent refresh yapıyor ama
+      // yine de güvenli olsun diye bir kez daha sync deneyebiliriz)
+      await ProfileStore.instance.refreshFromServer(silent: true);
+
+      final me = ProfileStore.instance.me;
+      if (me == null) return;
+
+      final profileName = me.displayName.trim();
+      final canUseName = profileName.isNotEmpty && profileName != 'Misafir';
+
+      final computedAge = _ageFromBirthDate(me.birthDate);
+
+      // ✅ İsim: sadece boşsa ve kullanıcı dokunmadıysa doldur
+      if (!_nameTouched && _nameController.text.trim().isEmpty && canUseName) {
+        _nameController.text = profileName;
+      }
+
+      // ✅ Yaş: sadece boşsa ve kullanıcı dokunmadıysa doldur
+      if (!_ageTouched && _ageController.text.trim().isEmpty && computedAge != null) {
+        _ageController.text = computedAge.toString();
+      }
+
+      // (İstersen doğum yeri / doğum saati gibi alanlar el falında yok — okey)
+      if (mounted) setState(() {});
+    } catch (_) {
+      // offline vs. sessiz geç
+    } finally {
+      if (mounted) setState(() => _applyingProfile = false);
+    }
   }
 
   Future<void> _pickFromGalleryMulti() async {
@@ -82,10 +172,8 @@ class _HandScreenState extends State<HandScreen> {
     setState(() => _loading = true);
 
     try {
-      // ✅ device id tek sefer al, tüm çağrılarda kullan
       final deviceId = await DeviceIdService.getOrCreate();
 
-      // 1) start  (dominantHand/photoHand şu an API'de yok → kaldırıldı)
       final HandReading reading = await HandApi.start(
         deviceId: deviceId,
         name: _nameController.text.trim(),
@@ -94,16 +182,14 @@ class _HandScreenState extends State<HandScreen> {
         question: _questionController.text.trim(),
       );
 
-      // 2) upload (backend validasyon burada patlayabilir)
       await HandApi.uploadImages(
         deviceId: deviceId,
         readingId: reading.id,
-        imageFiles: _photos, // ✅ files: değil!
+        imageFiles: _photos,
       );
 
       if (!mounted) return;
 
-      // 3) ödeme ekranı
       Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => HandPaymentScreen(readingId: reading.id)),
       );
@@ -179,7 +265,6 @@ class _HandScreenState extends State<HandScreen> {
   }
 
   Widget _handPickers() {
-    // UI'da kalsın (ileride backend'e ekleriz), ama şu an kullanılmıyor.
     return GlassCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

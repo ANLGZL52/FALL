@@ -10,7 +10,13 @@ import 'tarot_select_screen.dart';
 
 class TarotSpreadSelectScreen extends StatefulWidget {
   final String question;
-  const TarotSpreadSelectScreen({super.key, required this.question});
+  final String name;
+
+  const TarotSpreadSelectScreen({
+    super.key,
+    required this.question,
+    required this.name,
+  });
 
   @override
   State<TarotSpreadSelectScreen> createState() => _TarotSpreadSelectScreenState();
@@ -20,7 +26,6 @@ class _TarotSpreadSelectScreenState extends State<TarotSpreadSelectScreen> {
   TarotSpreadType _type = TarotSpreadType.three;
   bool _loading = false;
 
-  // ✅ Yeni fiyatlar (TL) — senin son planın
   static const Map<TarotSpreadType, double> _prices = {
     TarotSpreadType.three: 149.0,
     TarotSpreadType.six: 199.0,
@@ -41,11 +46,10 @@ class _TarotSpreadSelectScreenState extends State<TarotSpreadSelectScreen> {
   Future<void> _goSelect() async {
     setState(() => _loading = true);
     try {
-      // ✅ START -> readingId al
       final startRes = await TarotApi.start(
         topic: "Tarot",
         question: widget.question,
-        name: "Misafir",
+        name: widget.name.trim().isEmpty ? "Misafir" : widget.name.trim(), // ✅ PROFİL ADI
         age: null,
         spreadType: _spreadToApi(_type),
       );
@@ -89,6 +93,7 @@ class _TarotSpreadSelectScreenState extends State<TarotSpreadSelectScreen> {
           children: [
             GlassCard(
               child: Text(
+                'Kullanıcı: ${widget.name}\n\n'
                 'Sorun:\n${widget.question}\n\n'
                 'Açılım türünü seç. Seçtiğin açılıma göre kart sayısı ve yorum derinliği belirlenir.',
                 style: const TextStyle(height: 1.35),

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../services/device_id_service.dart';
 import '../../services/iap_service.dart';
 import '../../services/product_catalog.dart';
+import '../../services/profile_store.dart'; // ✅ opsiyonel kişiselleştirme
 
 import 'hand_loading_screen.dart';
 
@@ -26,6 +27,27 @@ class _HandPaymentScreenState extends State<HandPaymentScreen> {
 
   // ✅ Debug modda store akışını test etmek istersen true
   static const bool debugUseStoreIap = false;
+
+  String _titleSuffix = ''; // opsiyonel: profil adı
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfileName();
+  }
+
+  Future<void> _loadProfileName() async {
+    try {
+      await ProfileStore.instance.init(alsoSyncServer: true);
+      final me = ProfileStore.instance.me;
+      final name = (me?.displayName ?? '').trim();
+      if (name.isNotEmpty && name != 'Misafir' && mounted) {
+        setState(() => _titleSuffix = ' • $name');
+      }
+    } catch (_) {
+      // sessiz geç
+    }
+  }
 
   Future<void> _pay() async {
     setState(() => _loading = true);
@@ -69,7 +91,7 @@ class _HandPaymentScreenState extends State<HandPaymentScreen> {
   @override
   Widget build(BuildContext context) {
     return MysticScaffold(
-      appBar: AppBar(title: const Text('Ödeme')),
+      appBar: AppBar(title: Text('Ödeme$_titleSuffix')),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: ListView(
@@ -99,11 +121,16 @@ class _HandPaymentScreenState extends State<HandPaymentScreen> {
                     'Vergiler Google Play tarafından ödeme sırasında eklenir.',
                     style: TextStyle(color: Colors.white.withOpacity(0.70), fontSize: 11, height: 1.2),
                   ),
-                  const SizedBox(height: 10),
-                  Text(
-                    'SKU: ${ProductCatalog.hand39}',
-                    style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 12),
-                  ),
+
+                  // ✅ Release'te SKU göstermiyoruz
+                  if (!kReleaseMode) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      'SKU: ${ProductCatalog.hand39}',
+                      style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 12),
+                    ),
+                  ],
+
                   if (_lastPaymentId != null) ...[
                     const SizedBox(height: 6),
                     Text(

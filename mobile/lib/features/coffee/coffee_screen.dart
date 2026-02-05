@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../models/coffee_reading.dart';
 import '../../services/coffee_api.dart';
 import '../../services/device_id_service.dart';
+import '../../services/profile_store.dart';
 
 import '../../widgets/glass_card.dart';
 import '../../widgets/gradient_button.dart';
@@ -30,8 +31,107 @@ class _CoffeeScreenState extends State<CoffeeScreen> {
 
   bool _loading = false;
 
+  // ✅ Profil otomatik doldurma kontrolü (İsim)
+  bool _nameDirty = false;
+  bool _nameAppliedOnce = false;
+
+  // ✅ Profil otomatik doldurma kontrolü (Yaş)
+  bool _ageDirty = false;
+  bool _ageAppliedOnce = false;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _nameController.addListener(() {
+      _nameDirty = true;
+    });
+
+    _ageController.addListener(() {
+      _ageDirty = true;
+    });
+
+    _bootProfileForCoffee();
+  }
+
+  Future<void> _bootProfileForCoffee() async {
+    try {
+      await ProfileStore.instance.init(alsoSyncServer: true);
+      ProfileStore.instance.addListener(_onProfileChanged);
+
+      _applyFromProfile(force: true);
+    } catch (_) {
+      // offline vs sessiz geç
+    }
+  }
+
+  void _onProfileChanged() {
+    if (!mounted) return;
+    _applyFromProfile(force: false);
+  }
+
+  int? _ageFromBirthDate(String? birthDate) {
+    final s = (birthDate ?? '').trim();
+    if (s.isEmpty) return null;
+
+    // YYYY-MM-DD bekliyoruz
+    final parts = s.split('-');
+    if (parts.length != 3) return null;
+
+    final y = int.tryParse(parts[0]);
+    final m = int.tryParse(parts[1]);
+    final d = int.tryParse(parts[2]);
+    if (y == null || m == null || d == null) return null;
+
+    final now = DateTime.now();
+    int age = now.year - y;
+
+    // bu yıl doğum günü geldi mi?
+    final birthdayThisYear = DateTime(now.year, m, d);
+    if (now.isBefore(birthdayThisYear)) {
+      age -= 1;
+    }
+
+    if (age < 0 || age > 120) return null;
+    return age;
+  }
+
+  void _applyFromProfile({required bool force}) {
+    final me = ProfileStore.instance.me;
+    if (me == null) return;
+
+    // ---------- İSİM ----------
+    if (force || (!_nameDirty && !_nameAppliedOnce)) {
+      final name = me.displayName.trim();
+      if (name.isNotEmpty && name != 'Misafir') {
+        if (_nameController.text.trim().isEmpty || force) {
+          _nameController.text = name;
+        }
+      }
+      _nameAppliedOnce = true;
+      _nameDirty = false; // store bastıysak dirty sayma
+    }
+
+    // ---------- YAŞ ----------
+    if (force || (!_ageDirty && !_ageAppliedOnce)) {
+      final computedAge = _ageFromBirthDate(me.birthDate);
+      if (computedAge != null) {
+        // age alanı boşsa veya force ise doldur
+        if (_ageController.text.trim().isEmpty || force) {
+          _ageController.text = computedAge.toString();
+        }
+      }
+      _ageAppliedOnce = true;
+      _ageDirty = false;
+    }
+
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    ProfileStore.instance.removeListener(_onProfileChanged);
+
     _topicController.dispose();
     _questionController.dispose();
     _nameController.dispose();
@@ -73,7 +173,6 @@ class _CoffeeScreenState extends State<CoffeeScreen> {
     setState(() => _loading = true);
 
     try {
-      // ✅ KRİTİK: Start + Upload için device id gönder
       final deviceId = await DeviceIdService.getOrCreate();
 
       final CoffeeReading reading = await CoffeeApi.start(
@@ -84,7 +183,6 @@ class _CoffeeScreenState extends State<CoffeeScreen> {
         deviceId: deviceId,
       );
 
-      // ✅ upload da deviceId ile
       await CoffeeApi.uploadPhotos(
         readingId: reading.id,
         imageFiles: _photos,

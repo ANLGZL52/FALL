@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:lunaura/widgets/mystic_scaffold.dart';
 import 'package:lunaura/services/personality_api.dart';
+import 'package:lunaura/services/profile_store.dart';
+
 import 'personality_payment_screen.dart';
 
 class PersonalityFormScreen extends StatefulWidget {
@@ -19,17 +21,162 @@ class _PersonalityFormScreenState extends State<PersonalityFormScreen> {
   TimeOfDay? _birthTime; // opsiyonel
   bool _loading = false;
 
+  // ✅ Profil ile otomatik doldurma kontrolü
+  bool _useProfile = true;
+  bool _prefilledOnce = false;
+
+  // ✅ Profil değişimini yakalamak için signature
+  String _lastProfileSig = "";
+
   String _fmtDate(DateTime d) {
     final y = d.year.toString().padLeft(4, "0");
     final m = d.month.toString().padLeft(2, "0");
     final day = d.day.toString().padLeft(2, "0");
     return "$y-$m-$day";
-    }
+  }
 
   String _fmtTime(TimeOfDay t) {
     final hh = t.hour.toString().padLeft(2, "0");
     final mm = t.minute.toString().padLeft(2, "0");
     return "$hh:$mm";
+  }
+
+  void _toast(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.fromLTRB(18, 0, 18, 90),
+      ),
+    );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _boot();
+  }
+
+  Future<void> _boot() async {
+    await ProfileStore.instance.init(alsoSyncServer: true);
+    _applyProfileIfNeeded();
+    ProfileStore.instance.addListener(_onProfileChanged);
+  }
+
+  void _onProfileChanged() {
+    if (!mounted) return;
+    _applyProfileIfNeeded();
+  }
+
+  DateTime? _tryParseDate(String s) {
+    final v = s.trim();
+    if (v.isEmpty) return null;
+    try {
+      final parts = v.split("-");
+      if (parts.length != 3) return null;
+      final y = int.parse(parts[0]);
+      final m = int.parse(parts[1]);
+      final d = int.parse(parts[2]);
+      return DateTime(y, m, d);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  TimeOfDay? _tryParseTime(String s) {
+    final v = s.trim();
+    if (v.isEmpty) return null;
+    try {
+      final parts = v.split(":");
+      if (parts.length != 2) return null;
+      final h = int.parse(parts[0]);
+      final m = int.parse(parts[1]);
+      if (h < 0 || h > 23 || m < 0 || m > 59) return null;
+      return TimeOfDay(hour: h, minute: m);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _applyProfileIfNeeded() {
+    if (!_useProfile) return;
+
+    final me = ProfileStore.instance.me;
+    if (me == null) return;
+
+    // ✅ profil değiştiyse yeniden prefill et (değişmediyse ve bir kez yaptıysak dokunma)
+    final sig = "${me.displayName}|${me.birthDate}|${me.birthTime}|${me.birthPlace}";
+    if (_prefilledOnce && _lastProfileSig == sig) return;
+    _lastProfileSig = sig;
+
+    final name = me.displayName.trim();
+    final bdStr = (me.birthDate ?? '').trim();
+    final btStr = (me.birthTime ?? '').trim();
+    final city = (me.birthPlace ?? '').trim();
+
+    // Boşsa doldur — kullanıcı yazdığını ezmeyelim
+    if (_nameCtrl.text.trim().isEmpty && name.isNotEmpty && name != 'Misafir') {
+      _nameCtrl.text = name;
+    }
+    if (_birthDate == null && bdStr.isNotEmpty) {
+      final parsed = _tryParseDate(bdStr);
+      if (parsed != null) _birthDate = parsed;
+    }
+    if (_birthTime == null && btStr.isNotEmpty) {
+      final parsed = _tryParseTime(btStr);
+      if (parsed != null) _birthTime = parsed;
+    }
+    if (_cityCtrl.text.trim().isEmpty && city.isNotEmpty) {
+      _cityCtrl.text = city;
+    }
+
+    if (_nameCtrl.text.trim().isNotEmpty || _birthDate != null || _cityCtrl.text.trim().isNotEmpty) {
+      _prefilledOnce = true;
+      if (mounted) setState(() {});
+    }
+  }
+
+  void _setUseProfile(bool v) {
+    setState(() {
+      _useProfile = v;
+      if (_useProfile) {
+        _prefilledOnce = false;
+        _lastProfileSig = "";
+        _applyProfileIfNeeded();
+      } else {
+        // başkası için hızlı temizle
+        _nameCtrl.clear();
+        _cityCtrl.clear();
+        _birthDate = null;
+        _birthTime = null;
+      }
+    });
+  }
+
+  Widget _profileToggle() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.30),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              "Profil bilgilerimi kullan",
+              style: TextStyle(color: Colors.white.withOpacity(0.88), fontWeight: FontWeight.w800),
+            ),
+          ),
+          Switch(
+            value: _useProfile,
+            onChanged: _setUseProfile,
+            activeColor: const Color(0xFFF5C361),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _pickBirthDate() async {
@@ -55,16 +202,6 @@ class _PersonalityFormScreenState extends State<PersonalityFormScreen> {
     if (picked != null) setState(() => _birthTime = picked);
   }
 
-  void _toast(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg),
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.fromLTRB(18, 0, 18, 90),
-      ),
-    );
-  }
-
   Future<void> _continue() async {
     final name = _nameCtrl.text.trim();
     final city = _cityCtrl.text.trim();
@@ -74,10 +211,10 @@ class _PersonalityFormScreenState extends State<PersonalityFormScreen> {
     if (_birthDate == null) return _toast("Doğum tarihi seç");
     if (city.isEmpty) return _toast("Doğum yeri (şehir) gir");
 
+    if (_loading) return;
     setState(() => _loading = true);
 
     try {
-      // ✅ konu UI yok, backend'e sabit "genel" yolluyoruz
       final reading = await PersonalityApi.start(
         name: name,
         birthDate: _fmtDate(_birthDate!),
@@ -113,6 +250,8 @@ class _PersonalityFormScreenState extends State<PersonalityFormScreen> {
 
   @override
   void dispose() {
+    ProfileStore.instance.removeListener(_onProfileChanged);
+
     _nameCtrl.dispose();
     _cityCtrl.dispose();
     _questionCtrl.dispose();
@@ -151,6 +290,9 @@ class _PersonalityFormScreenState extends State<PersonalityFormScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    _profileToggle(),
+                    const SizedBox(height: 12),
+
                     const Text(
                       "Gerekli Bilgiler",
                       style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w900),

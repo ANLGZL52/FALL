@@ -1,10 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
-
 import 'package:http/http.dart' as http;
 
 import '../models/hand_reading.dart';
 import 'api_base.dart';
+import 'device_id_service.dart';
 
 String _extractErrorMessage(String body) {
   try {
@@ -24,22 +24,20 @@ class HandApi {
   static const Duration _timeout = Duration(seconds: 45);
   static const Duration _generateTimeout = Duration(seconds: 180);
 
-  static void _requireDeviceId(String deviceId) {
-    final d = deviceId.trim();
-    if (d.isEmpty) {
-      // ✅ Fail-fast: backend'e boş header ile gitme, direkt burada yakala
-      throw StateError('X-Device-Id gerekli (deviceId boş).');
-    }
+  static Future<String> _resolveDeviceId(String? deviceId) async {
+    final d = (deviceId ?? '').trim();
+    if (d.isNotEmpty && d.length >= 8) return d;
+    return await DeviceIdService.getOrCreate();
   }
 
   static Future<HandReading> start({
-    required String deviceId,
+    String? deviceId,
     required String topic,
     required String question,
     required String name,
     int? age,
   }) async {
-    _requireDeviceId(deviceId);
+    final did = await _resolveDeviceId(deviceId);
 
     final body = {
       "topic": topic,
@@ -51,7 +49,7 @@ class HandApi {
     final res = await http
         .post(
           _u('/hand/start'),
-          headers: ApiBase.headers(deviceId: deviceId),
+          headers: ApiBase.headers(deviceId: did),
           body: jsonEncode(body),
         )
         .timeout(_timeout);
@@ -64,14 +62,14 @@ class HandApi {
   }
 
   static Future<HandReading> uploadImages({
-    required String deviceId,
+    String? deviceId,
     required String readingId,
     required List<File> imageFiles,
   }) async {
-    _requireDeviceId(deviceId);
+    final did = await _resolveDeviceId(deviceId);
 
     final req = http.MultipartRequest('POST', _u('/hand/$readingId/upload-images'));
-    req.headers.addAll(ApiBase.headers(deviceId: deviceId));
+    req.headers.addAll(ApiBase.headers(deviceId: did));
 
     for (final f in imageFiles) {
       req.files.add(await http.MultipartFile.fromPath('files', f.path));
@@ -88,15 +86,15 @@ class HandApi {
   }
 
   static Future<HandReading> detail({
-    required String deviceId,
+    String? deviceId,
     required String readingId,
   }) async {
-    _requireDeviceId(deviceId);
+    final did = await _resolveDeviceId(deviceId);
 
     final res = await http
         .get(
           _u('/hand/$readingId'),
-          headers: ApiBase.headers(deviceId: deviceId),
+          headers: ApiBase.headers(deviceId: did),
         )
         .timeout(_timeout);
 
@@ -108,15 +106,15 @@ class HandApi {
   }
 
   static Future<HandReading> generate({
-    required String deviceId,
+    String? deviceId,
     required String readingId,
   }) async {
-    _requireDeviceId(deviceId);
+    final did = await _resolveDeviceId(deviceId);
 
     final res = await http
         .post(
           _u('/hand/$readingId/generate'),
-          headers: ApiBase.headers(deviceId: deviceId),
+          headers: ApiBase.headers(deviceId: did),
         )
         .timeout(_generateTimeout);
 
@@ -128,16 +126,16 @@ class HandApi {
   }
 
   static Future<HandReading> rate({
-    required String deviceId,
+    String? deviceId,
     required String readingId,
     required int rating,
   }) async {
-    _requireDeviceId(deviceId);
+    final did = await _resolveDeviceId(deviceId);
 
     final res = await http
         .post(
           _u('/hand/$readingId/rate'),
-          headers: ApiBase.headers(deviceId: deviceId),
+          headers: ApiBase.headers(deviceId: did),
           body: jsonEncode({"rating": rating}),
         )
         .timeout(_timeout);

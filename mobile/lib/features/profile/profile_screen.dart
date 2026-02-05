@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../services/device_id_service.dart';
-import '../../services/profile_api.dart';
 import '../../models/profile_models.dart';
+import '../../services/profile_store.dart';
 import '../../widgets/mystic_scaffold.dart';
 import 'profile_legal_screen.dart';
 
@@ -23,10 +21,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _loading = true;
   bool _saving = false;
 
+  /// Kullanıcı alanlara dokunduysa true.
+  /// Store refresh geldi diye kullanıcı girdisini ezmeyelim.
+  bool _dirty = false;
+
+  /// İlk kez store’dan form doldurma (ya da dirty değilken)
+  bool _appliedOnce = false;
+
   @override
   void initState() {
     super.initState();
     _boot();
+
+    _nameCtrl.addListener(_markDirty);
+    _birthDateCtrl.addListener(_markDirty);
+    _birthPlaceCtrl.addListener(_markDirty);
+    _birthTimeCtrl.addListener(_markDirty);
+  }
+
+  void _markDirty() {
+    // typing sırasında sürekli setState yapmayalım
+    _dirty = true;
   }
 
   void _toast(String msg) {
@@ -41,8 +56,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _boot() async {
     try {
-      await _loadLocal();        // hızlı açılış
-      await _syncFromServer();   // Railway sync
+      // ✅ local hızlı yükle + server sync
+      await ProfileStore.instance.init(alsoSyncServer: true);
+
+      // store değişince UI kendini yenilesin
+      ProfileStore.instance.addListener(_onStoreChanged);
+
+      // ilk dolum
+      _applyFromStore(force: true);
     } catch (_) {
       // offline vs. sessiz geç
     } finally {
@@ -50,47 +71,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  Future<void> _loadLocal() async {
-    final sp = await SharedPreferences.getInstance();
-    _nameCtrl.text = sp.getString('profile_name') ?? '';
-    _birthDateCtrl.text = sp.getString('profile_birth_date') ?? '';
-    _birthPlaceCtrl.text = sp.getString('profile_birth_place') ?? '';
-    _birthTimeCtrl.text = sp.getString('profile_birth_time') ?? '';
-    if (mounted) setState(() {});
+  void _onStoreChanged() {
+    if (!mounted) return;
+    _applyFromStore(force: false);
   }
 
-  Future<void> _saveLocal({
-    required String name,
-    required String birthDate,
-    required String birthPlace,
-    required String birthTime,
-  }) async {
-    final sp = await SharedPreferences.getInstance();
-    await sp.setString('profile_name', name);
-    await sp.setString('profile_birth_date', birthDate);
-    await sp.setString('profile_birth_place', birthPlace);
-    await sp.setString('profile_birth_time', birthTime);
-  }
+  void _applyFromStore({required bool force}) {
+    final me = ProfileStore.instance.me;
+    if (me == null) return;
 
-  Future<void> _syncFromServer() async {
-    final deviceId = await DeviceIdService.getOrCreate();
-    final me = await ProfileApi.getMe(deviceId: deviceId);
+    // Eğer kullanıcı yazmaya başladıysa ve force değilse ezme
+    if (!force && _dirty) return;
 
-    if (me.displayName.trim().isNotEmpty && me.displayName != "Misafir") {
-      _nameCtrl.text = me.displayName;
-    }
-    if ((me.birthDate ?? '').trim().isNotEmpty) _birthDateCtrl.text = me.birthDate!;
-    if ((me.birthPlace ?? '').trim().isNotEmpty) _birthPlaceCtrl.text = me.birthPlace!;
-    if ((me.birthTime ?? '').trim().isNotEmpty) _birthTimeCtrl.text = me.birthTime!;
+    // İlk kez uygula veya force
+    if (_appliedOnce && !force) return;
 
-    await _saveLocal(
-      name: _nameCtrl.text.trim(),
-      birthDate: _birthDateCtrl.text.trim(),
-      birthPlace: _birthPlaceCtrl.text.trim(),
-      birthTime: _birthTimeCtrl.text.trim(),
-    );
+    final name = me.displayName.trim();
+    final bd = (me.birthDate ?? '').trim();
+    final bp = (me.birthPlace ?? '').trim();
+    final bt = (me.birthTime ?? '').trim();
 
-    if (mounted) setState(() {});
+    _nameCtrl.text = (name.isNotEmpty && name != 'Misafir') ? name : '';
+    _birthDateCtrl.text = bd;
+    _birthPlaceCtrl.text = bp;
+    _birthTimeCtrl.text = bt;
+
+    _appliedOnce = true;
+
+    // store’dan bastık → kullanıcı değişikliği sayma
+    _dirty = false;
+
+    setState(() {});
   }
 
   Future<void> _saveAll() async {
@@ -108,23 +119,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     setState(() => _saving = true);
     try {
-      await _saveLocal(
-        name: name,
-        birthDate: birthDate,
-        birthPlace: birthPlace,
-        birthTime: birthTime,
-      );
-
-      final deviceId = await DeviceIdService.getOrCreate();
-      await ProfileApi.upsertMe(
-        deviceId: deviceId,
-        req: ProfileUpsertRequest(
+      await ProfileStore.instance.save(
+        ProfileUpsertRequest(
           displayName: name,
           birthDate: birthDate.isEmpty ? null : birthDate,
           birthPlace: birthPlace.isEmpty ? null : birthPlace,
           birthTime: birthTime.isEmpty ? null : birthTime,
         ),
       );
+
+      // Kaydedildi → artık dirty değil
+      _dirty = false;
 
       _toast("Kaydedildi ✅");
     } catch (e) {
@@ -136,6 +141,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   void dispose() {
+    ProfileStore.instance.removeListener(_onStoreChanged);
+
+    _nameCtrl.removeListener(_markDirty);
+    _birthDateCtrl.removeListener(_markDirty);
+    _birthPlaceCtrl.removeListener(_markDirty);
+    _birthTimeCtrl.removeListener(_markDirty);
+
     _nameCtrl.dispose();
     _birthDateCtrl.dispose();
     _birthPlaceCtrl.dispose();
@@ -191,7 +203,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ],
             ),
             const SizedBox(height: 8),
-
             Expanded(
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
@@ -202,13 +213,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           title: "Kişisel Bilgiler",
                           child: Column(
                             children: [
-                              TextField(controller: _nameCtrl, style: const TextStyle(color: Colors.white), decoration: _dec("Ad / Takma ad")),
+                              TextField(
+                                controller: _nameCtrl,
+                                style: const TextStyle(color: Colors.white),
+                                decoration: _dec("Ad / Takma ad"),
+                              ),
                               const Divider(color: Colors.white12),
-                              TextField(controller: _birthDateCtrl, style: const TextStyle(color: Colors.white), decoration: _dec("Doğum tarihi (YYYY-AA-GG)")),
+                              TextField(
+                                controller: _birthDateCtrl,
+                                style: const TextStyle(color: Colors.white),
+                                decoration: _dec("Doğum tarihi (YYYY-AA-GG)"),
+                              ),
                               const Divider(color: Colors.white12),
-                              TextField(controller: _birthPlaceCtrl, style: const TextStyle(color: Colors.white), decoration: _dec("Doğum yeri (opsiyonel)")),
+                              TextField(
+                                controller: _birthPlaceCtrl,
+                                style: const TextStyle(color: Colors.white),
+                                decoration: _dec("Doğum yeri (opsiyonel)"),
+                              ),
                               const Divider(color: Colors.white12),
-                              TextField(controller: _birthTimeCtrl, style: const TextStyle(color: Colors.white), decoration: _dec("Doğum saati (HH:MM, opsiyonel)")),
+                              TextField(
+                                controller: _birthTimeCtrl,
+                                style: const TextStyle(color: Colors.white),
+                                decoration: _dec("Doğum saati (HH:MM, opsiyonel)"),
+                              ),
                               const SizedBox(height: 14),
                               SizedBox(
                                 width: double.infinity,
@@ -227,14 +254,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               ),
                               const SizedBox(height: 10),
                               Text(
-                                "Not: Bilgiler cihazında cache’lenir ve Railway DB’ye de kaydedilir.",
-                                style: TextStyle(color: Colors.white.withOpacity(0.70), fontSize: 12),
+                                "Not: Bilgiler cihazında cache’lenir ve Railway DB’ye de kaydedilir.\nBu ekran artık ProfileStore üzerinden tek kaynak mantığıyla çalışır.",
+                                style: TextStyle(color: Colors.white.withOpacity(0.70), fontSize: 12, height: 1.25),
                               ),
                             ],
                           ),
                         ),
                         const SizedBox(height: 12),
-
                         _card(
                           title: "Benim Okumalarım",
                           child: Text(
@@ -242,9 +268,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             style: TextStyle(color: Colors.white.withOpacity(0.80), height: 1.3),
                           ),
                         ),
-
                         const SizedBox(height: 12),
-
                         _card(
                           title: "Yasal",
                           child: Column(

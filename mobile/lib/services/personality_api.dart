@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import 'api_base.dart';
+import 'device_id_service.dart';
 
 String _extractErrorMessage(String body) {
   try {
@@ -73,24 +74,32 @@ class PersonalityReading {
 class PersonalityApi {
   static Uri _u(String path) => Uri.parse('${ApiBase.baseUrl}$path');
 
-  // OpenAI çağrısı içerdiği için daha uzun timeout iyi olur.
-  static const Duration _generateTimeout = Duration(seconds: 120);
+  // backend generate artık hemen dönecek → 30s yeter
+  static const Duration _generateTimeout = Duration(seconds: 30);
   static const Duration _defaultTimeout = Duration(seconds: 30);
+
+  static Future<String> _device(String? deviceId) async {
+    final d = (deviceId ?? '').trim();
+    if (d.isNotEmpty) return d;
+    return DeviceIdService.getOrCreate();
+  }
 
   static Future<PersonalityReading> start({
     required String name,
-    required String birthDate, // YYYY-MM-DD
-    String? birthTime, // HH:MM
+    required String birthDate,
+    String? birthTime,
     required String birthCity,
     String birthCountry = "TR",
     String topic = "genel",
     String? question,
     String? deviceId,
   }) async {
+    final d = await _device(deviceId);
+
     final res = await http
         .post(
           _u('/personality/start'),
-          headers: ApiBase.headers(deviceId: deviceId),
+          headers: ApiBase.headers(deviceId: d),
           body: jsonEncode({
             "name": name,
             "birth_date": birthDate,
@@ -110,12 +119,33 @@ class PersonalityApi {
     return PersonalityReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
-  /// ✅ LEGACY only (bozulmasın diye kalsın)
+  static Future<PersonalityReading> detail({
+    required String readingId,
+    String? deviceId,
+  }) async {
+    final d = await _device(deviceId);
+
+    final res = await http
+        .get(
+          _u('/personality/$readingId'),
+          headers: ApiBase.headers(deviceId: d),
+        )
+        .timeout(_defaultTimeout);
+
+    if (res.statusCode >= 400) {
+      throw Exception('personality detail failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
+    }
+
+    return PersonalityReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
+
   static Future<PersonalityReading> markPaid({
     required String readingId,
     String? paymentRef,
     String? deviceId,
   }) async {
+    final d = await _device(deviceId);
+
     final ref = (paymentRef ?? '').trim();
     if (ref.isNotEmpty && !ref.startsWith("TEST-")) {
       throw Exception("markPaid legacy only. Real payments use /payments/verify.");
@@ -124,7 +154,7 @@ class PersonalityApi {
     final res = await http
         .post(
           _u('/personality/$readingId/mark-paid'),
-          headers: ApiBase.headers(deviceId: deviceId),
+          headers: ApiBase.headers(deviceId: d),
           body: jsonEncode({"payment_ref": paymentRef}),
         )
         .timeout(_defaultTimeout);
@@ -140,10 +170,12 @@ class PersonalityApi {
     required String readingId,
     String? deviceId,
   }) async {
+    final d = await _device(deviceId);
+
     final res = await http
         .post(
           _u('/personality/$readingId/generate'),
-          headers: ApiBase.headers(deviceId: deviceId),
+          headers: ApiBase.headers(deviceId: d),
         )
         .timeout(_generateTimeout);
 
@@ -159,10 +191,12 @@ class PersonalityApi {
     required int rating,
     String? deviceId,
   }) async {
+    final d = await _device(deviceId);
+
     final res = await http
         .post(
           _u('/personality/$readingId/rate'),
-          headers: ApiBase.headers(deviceId: deviceId),
+          headers: ApiBase.headers(deviceId: d),
           body: jsonEncode({"rating": rating}),
         )
         .timeout(_defaultTimeout);
@@ -176,10 +210,12 @@ class PersonalityApi {
     required String readingId,
     String? deviceId,
   }) async {
+    final d = await _device(deviceId);
+
     final res = await http
         .get(
           _u('/personality/$readingId/pdf'),
-          headers: ApiBase.headers(deviceId: deviceId),
+          headers: ApiBase.headers(deviceId: d),
         )
         .timeout(_defaultTimeout);
 

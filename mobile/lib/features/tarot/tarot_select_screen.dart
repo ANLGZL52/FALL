@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../services/tarot_api.dart';
+import '../../services/device_id_service.dart';
 import '../../widgets/gradient_button.dart';
 import '../../widgets/glass_card.dart';
 import '../../widgets/mystic_scaffold.dart';
@@ -66,15 +67,23 @@ class _TarotSelectScreenState extends State<TarotSelectScreen> {
 
   Future<void> _saveAndGoPayment() async {
     if (_picked.length != _need || !_revealed) return;
+    if (_loading) return;
 
     setState(() => _loading = true);
     try {
+      final deviceId = await DeviceIdService.getOrCreate();
+
       final cards = _picked.map((c) {
         final revFlag = c.isReversed ? "R" : "U";
         return "${c.id}|$revFlag";
       }).toList();
 
-      await TarotApi.selectCards(readingId: widget.readingId, cards: cards);
+      // ✅ KRİTİK: deviceId gönder
+      await TarotApi.selectCards(
+        readingId: widget.readingId,
+        cards: cards,
+        deviceId: deviceId,
+      );
 
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
@@ -123,9 +132,6 @@ class _TarotSelectScreenState extends State<TarotSelectScreen> {
           ),
         ],
       ),
-
-      // ✅ ÇAKIŞMA FIX'İN ÖZÜ BURASI:
-      // SafeArea sayesinde body artık AppBar/statusbar altına girmiyor.
       body: SafeArea(
         top: true,
         bottom: true,
@@ -141,7 +147,6 @@ class _TarotSelectScreenState extends State<TarotSelectScreen> {
                   style: const TextStyle(height: 1.25),
                 ),
               ),
-
               const SizedBox(height: 10),
 
               /// ✅ SLOT ALANI
@@ -166,7 +171,7 @@ class _TarotSelectScreenState extends State<TarotSelectScreen> {
 
                   const headerH = 24.0;
                   const vGap = 8.0;
-                  const extraBuffer = 46.0; // biraz düşürdüm ama hâlâ güvenli
+                  const extraBuffer = 46.0;
 
                   final slotAreaH = headerH + vGap + cardH + extraBuffer;
 
@@ -189,7 +194,6 @@ class _TarotSelectScreenState extends State<TarotSelectScreen> {
                               ),
                             ),
                             const SizedBox(height: vGap),
-
                             Expanded(
                               child: Align(
                                 alignment: Alignment.topLeft,

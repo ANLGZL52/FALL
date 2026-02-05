@@ -179,9 +179,7 @@ def _ensure_columns(table: str, columns: Dict[str, str]) -> None:
         alters: list[str] = []
         for col, coltype in columns.items():
             if not _pg_has_column(table, col):
-                alters.append(
-                    f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {coltype};"
-                )
+                alters.append(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {coltype};")
         _pg_add_cols(table, alters)
         return
 
@@ -190,10 +188,6 @@ def _ensure_columns(table: str, columns: Dict[str, str]) -> None:
 # ✅ Fix legacy SERIAL/INTEGER/BIGINT id -> VARCHAR
 # ==========================================================
 def ensure_id_varchar(table: str) -> None:
-    """
-    Legacy DB'lerde id SERIAL/INTEGER/BIGINT/IDENTITY gelebiliyor.
-    Model UUID string gönderdiği için id kolonu VARCHAR olmalı.
-    """
     if not _is_postgres():
         return
     if not _pg_has_table(table):
@@ -206,30 +200,25 @@ def ensure_id_varchar(table: str) -> None:
         print(f"[DB] {table}.id is {dtype} -> converting to VARCHAR...")
 
         with engine.begin() as conn:
-            # 1) IDENTITY varsa düşür
             try:
-                conn.execute(text(f"""
-                    ALTER TABLE {table}
-                      ALTER COLUMN id DROP IDENTITY IF EXISTS;
-                """))
+                conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN id DROP IDENTITY IF EXISTS;"))
             except Exception:
                 pass
 
-            # 2) SERIAL default/nextval varsa düşür
             try:
-                conn.execute(text(f"""
-                    ALTER TABLE {table}
-                      ALTER COLUMN id DROP DEFAULT;
-                """))
+                conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN id DROP DEFAULT;"))
             except Exception:
                 pass
 
-            # 3) Type değiştir
-            conn.execute(text(f"""
-                ALTER TABLE {table}
-                  ALTER COLUMN id TYPE VARCHAR
-                  USING id::text;
-            """))
+            conn.execute(
+                text(
+                    f"""
+                    ALTER TABLE {table}
+                      ALTER COLUMN id TYPE VARCHAR
+                      USING id::text;
+                    """
+                )
+            )
 
         print(f"[DB] {table}.id converted to VARCHAR.")
 
@@ -238,13 +227,6 @@ def ensure_id_varchar(table: str) -> None:
 # ✅ FIX: legacy synastry_readings.reading_id NOT NULL
 # ==========================================================
 def ensure_fix_legacy_synastry_reading_id() -> None:
-    """
-    Eski DB'lerde synastry_readings tablosunda 'reading_id' kolonu kalmış olabiliyor.
-    NOT NULL ise INSERT patlar (senin aldığın hata).
-
-    En iyi çözüm: DROP COLUMN (artık kullanılmıyor).
-    DROP olmazsa: NOT NULL kaldır (nullable yap).
-    """
     if not _is_postgres():
         return
     if not _pg_has_table("synastry_readings"):
@@ -254,41 +236,25 @@ def ensure_fix_legacy_synastry_reading_id() -> None:
 
     print("[DB] legacy synastry_readings.reading_id detected -> fixing...")
 
-    # 1) Önce DROP dene (temiz çözüm)
     try:
         with engine.begin() as conn:
-            conn.execute(text("""
-                ALTER TABLE synastry_readings
-                DROP COLUMN IF EXISTS reading_id;
-            """))
+            conn.execute(text("ALTER TABLE synastry_readings DROP COLUMN IF EXISTS reading_id;"))
         print("[DB] synastry_readings.reading_id dropped.")
         return
     except Exception as e:
         print(f"[DB] DROP reading_id failed, fallback to nullable. reason={e}")
 
-    # 2) DROP olmadıysa: nullable yap
     with engine.begin() as conn:
         try:
-            conn.execute(text("""
-                ALTER TABLE synastry_readings
-                  ALTER COLUMN reading_id DROP DEFAULT;
-            """))
+            conn.execute(text("ALTER TABLE synastry_readings ALTER COLUMN reading_id DROP DEFAULT;"))
         except Exception:
             pass
-
         try:
-            conn.execute(text("""
-                ALTER TABLE synastry_readings
-                  ALTER COLUMN reading_id DROP IDENTITY IF EXISTS;
-            """))
+            conn.execute(text("ALTER TABLE synastry_readings ALTER COLUMN reading_id DROP IDENTITY IF EXISTS;"))
         except Exception:
             pass
-
         try:
-            conn.execute(text("""
-                ALTER TABLE synastry_readings
-                  ALTER COLUMN reading_id DROP NOT NULL;
-            """))
+            conn.execute(text("ALTER TABLE synastry_readings ALTER COLUMN reading_id DROP NOT NULL;"))
         except Exception:
             pass
 
@@ -308,13 +274,13 @@ def ensure_coffee_schema() -> None:
             "is_paid": "BOOLEAN",
             "payment_ref": "VARCHAR",
             "status": "VARCHAR",
-            "result_text": "VARCHAR",
+            "result_text": "TEXT",
             "rating": "INTEGER",
-            "images_json": "VARCHAR",
+            "images_json": "TEXT",
             "name": "VARCHAR",
             "age": "INTEGER",
             "topic": "VARCHAR",
-            "question": "VARCHAR",
+            "question": "TEXT",
         },
     )
 
@@ -333,13 +299,13 @@ def ensure_hand_schema() -> None:
             "is_paid": "BOOLEAN",
             "payment_ref": "VARCHAR",
             "status": "VARCHAR",
-            "result_text": "VARCHAR",
+            "result_text": "TEXT",
             "rating": "INTEGER",
-            "images_json": "VARCHAR",
+            "images_json": "TEXT",
             "name": "VARCHAR",
             "age": "INTEGER",
             "topic": "VARCHAR",
-            "question": "VARCHAR",
+            "question": "TEXT",
         },
     )
 
@@ -352,13 +318,13 @@ def ensure_tarot_schema() -> None:
             "name": "VARCHAR",
             "age": "INTEGER",
             "topic": "VARCHAR",
-            "question": "VARCHAR",
+            "question": "TEXT",
             "spread_type": "VARCHAR",
-            "cards_json": "VARCHAR",
+            "cards_json": "TEXT",
             "is_paid": "BOOLEAN",
             "payment_ref": "VARCHAR",
             "status": "VARCHAR",
-            "result_text": "VARCHAR",
+            "result_text": "TEXT",
             "rating": "INTEGER",
             "created_at": "TIMESTAMP",
             "updated_at": "TIMESTAMP",
@@ -373,11 +339,11 @@ def ensure_numerology_schema() -> None:
             "device_id": "VARCHAR",
             "payment_ref": "VARCHAR",
             "rating": "INTEGER",
-            "result_text": "VARCHAR",
+            "result_text": "TEXT",
             "created_at": "TIMESTAMP",
             "updated_at": "TIMESTAMP",
             "status": "VARCHAR",
-            "question": "VARCHAR",
+            "question": "TEXT",
             "name": "VARCHAR",
             "birth_date": "VARCHAR",
             "topic": "VARCHAR",
@@ -394,11 +360,11 @@ def ensure_birthchart_schema() -> None:
             "birth_time": "VARCHAR",
             "payment_ref": "VARCHAR",
             "rating": "INTEGER",
-            "result_text": "VARCHAR",
+            "result_text": "TEXT",
             "created_at": "TIMESTAMP",
             "updated_at": "TIMESTAMP",
             "status": "VARCHAR",
-            "question": "VARCHAR",
+            "question": "TEXT",
             "name": "VARCHAR",
             "birth_date": "VARCHAR",
             "birth_place": "VARCHAR",
@@ -415,14 +381,16 @@ def ensure_personality_schema() -> None:
             "device_id": "VARCHAR",
             "payment_ref": "VARCHAR",
             "rating": "INTEGER",
-            "result_text": "VARCHAR",
+            "result_text": "TEXT",
             "created_at": "TIMESTAMP",
             "updated_at": "TIMESTAMP",
             "status": "VARCHAR",
-            "question": "VARCHAR",
+            "question": "TEXT",
             "name": "VARCHAR",
             "birth_date": "VARCHAR",
             "birth_time": "VARCHAR",
+            "birth_city": "VARCHAR",     # ✅ FIX
+            "birth_country": "VARCHAR",  # ✅ FIX
             "topic": "VARCHAR",
             "is_paid": "BOOLEAN",
         },
@@ -445,11 +413,11 @@ def ensure_synastry_schema() -> None:
             "birth_city_b": "VARCHAR",
             "birth_country_b": "VARCHAR",
             "topic": "VARCHAR",
-            "question": "VARCHAR",
+            "question": "TEXT",
             "is_paid": "BOOLEAN",
             "payment_ref": "VARCHAR",
             "status": "VARCHAR",
-            "result_text": "VARCHAR",
+            "result_text": "TEXT",
             "rating": "INTEGER",
             "created_at": "TIMESTAMP",
             "updated_at": "TIMESTAMP",
@@ -471,7 +439,7 @@ def ensure_payments_schema() -> None:
             "platform": "VARCHAR",
             "transaction_id": "VARCHAR",
             "purchase_token": "VARCHAR",
-            "receipt_data": "VARCHAR",
+            "receipt_data": "TEXT",
             "created_at": "TIMESTAMP",
             "verified_at": "TIMESTAMP",
         },
@@ -500,17 +468,17 @@ def ensure_profile_constraints() -> None:
         return
 
     with engine.begin() as conn:
-        conn.execute(text("""
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_user_profiles_device_id
-            ON user_profiles (device_id);
-        """))
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS ux_user_profiles_device_id
+                ON user_profiles (device_id);
+                """
+            )
+        )
 
 
 def init_db() -> None:
-    """
-    - SQLite: create_all + sqlite migration helper'ları
-    - Postgres: advisory lock + create_all + postgres migration helper'ları
-    """
     try:
         if db_url.startswith("sqlite"):
             print(f"[DB] database_url = {db_url}")
@@ -540,7 +508,6 @@ def init_db() -> None:
         try:
             SQLModel.metadata.create_all(engine)
 
-            # ✅ 1) “eski int/bigint id” tablolarını düzelt (en kritik)
             for t in (
                 "synastry_readings",
                 "user_profiles",
@@ -554,10 +521,8 @@ def init_db() -> None:
             ):
                 ensure_id_varchar(t)
 
-            # ✅ 1.5) synastry legacy reading_id fix
             ensure_fix_legacy_synastry_reading_id()
 
-            # ✅ 2) Eksik kolonları tamamla
             ensure_coffee_schema()
             ensure_hand_schema()
             ensure_tarot_schema()
@@ -568,7 +533,6 @@ def init_db() -> None:
             ensure_payments_schema()
             ensure_profile_schema()
 
-            # ✅ 3) unique constraint (profile)
             ensure_profile_constraints()
         finally:
             conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": LOCK_KEY})

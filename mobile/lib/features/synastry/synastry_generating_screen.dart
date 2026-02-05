@@ -21,7 +21,7 @@ class _SynastryGeneratingScreenState extends State<SynastryGeneratingScreen> {
   String _status = 'processing';
   String? _error;
 
-  // ✅ NULL OLMASIN: artık güvenle her yerde kullanacağız
+  // ✅ NULL OLMASIN: her request'te zorunlu
   late final String _deviceId;
 
   bool _generateTriggered = false;
@@ -67,7 +67,7 @@ class _SynastryGeneratingScreenState extends State<SynastryGeneratingScreen> {
 
   Future<void> _start() async {
     try {
-      // ✅ burada kesin alıyoruz
+      // ✅ deviceId kesin al
       _deviceId = await DeviceIdService.getOrCreate();
 
       _timer?.cancel();
@@ -99,7 +99,7 @@ class _SynastryGeneratingScreenState extends State<SynastryGeneratingScreen> {
       try {
         await _api.generate(
           widget.readingId,
-          deviceId: _deviceId, // ✅ artık non-null
+          deviceId: _deviceId,
         );
         _generateInFlight = false;
         return;
@@ -125,7 +125,7 @@ class _SynastryGeneratingScreenState extends State<SynastryGeneratingScreen> {
           continue;
         }
 
-        // retry bitti -> poll devam etsin ama ekranda hata gösterebiliriz
+        // retry bitti -> ekranda hata
         setState(() {
           _status = 'error';
           _error = e.toString();
@@ -145,7 +145,7 @@ class _SynastryGeneratingScreenState extends State<SynastryGeneratingScreen> {
     try {
       final s = await _api.getStatus(
         widget.readingId,
-        deviceId: _deviceId, // ✅ artık non-null
+        deviceId: _deviceId,
       );
 
       if (!mounted) return;
@@ -156,7 +156,7 @@ class _SynastryGeneratingScreenState extends State<SynastryGeneratingScreen> {
 
       setState(() {
         _status = st.isEmpty ? 'processing' : st;
-        _error = s.error; // model'de yoksa null
+        _error = s.error;
       });
 
       // ✅ bittiyse result ekranı
@@ -174,17 +174,19 @@ class _SynastryGeneratingScreenState extends State<SynastryGeneratingScreen> {
         return;
       }
 
-      // backend "error" derse timerı kes (bu gerçek hata)
+      // backend "error" derse timerı kes
       if (_isErrorStatus(st)) {
         _timer?.cancel();
         return;
       }
 
       // ✅ generate tetik kuralı:
-      // sadece paid=true ve status paid / started iken
-      final shouldTriggerGenerate = paid && (st == 'paid' || st == 'started');
+      // paid=true iken paid/started/processing durumlarında 1 kez tetikle
+      // (senin "sonsuz bekleme" bug'ının sebebi processing'i tetiklememendi)
+      final shouldTriggerGenerate =
+          paid && (st == 'paid' || st == 'started' || st == 'processing');
 
-      // processing -> paid geri düştüyse 1 kez daha tetikle
+      // processing -> paid geri dönerse bir kez daha dene
       final cameBackToPaid = (_lastStatus == 'processing' && st == 'paid');
 
       if (shouldTriggerGenerate && (!_generateTriggered || cameBackToPaid)) {

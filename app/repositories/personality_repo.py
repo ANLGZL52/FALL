@@ -1,4 +1,3 @@
-# app/repositories/personality_repo.py
 from __future__ import annotations
 
 from datetime import datetime
@@ -12,6 +11,7 @@ from app.models.personality_db import PersonalityReadingDB
 def _dump(obj: PersonalityReadingDB) -> dict:
     return {
         "id": obj.id,
+        "device_id": getattr(obj, "device_id", None),
         "name": obj.name,
         "birth_date": obj.birth_date,
         "birth_time": obj.birth_time,
@@ -55,18 +55,24 @@ class PersonalityRepo:
         birth_country: str,
         topic: str,
         question: Optional[str],
+        device_id: Optional[str] = None,
     ) -> dict:
+        now = datetime.utcnow()
+
         obj = PersonalityReadingDB(
             id=reading_id,
+            device_id=device_id,
             name=name,
             birth_date=birth_date,
             birth_time=birth_time,
             birth_city=birth_city,
-            birth_country=birth_country or "TR",
-            topic=topic or "genel",
+            birth_country=(birth_country or "TR"),
+            topic=(topic or "genel"),
             question=question,
-            status="started",
+            status="created",
             is_paid=False,
+            created_at=now,
+            updated_at=now,
         )
         session.add(obj)
         session.commit()
@@ -77,7 +83,13 @@ class PersonalityRepo:
         obj = _get(session, reading_id)
         return _dump(obj) if obj else None
 
-    def mark_paid(self, *, session: Session, reading_id: str, payment_ref: Optional[str]) -> Optional[dict]:
+    def mark_paid(
+        self,
+        *,
+        session: Session,
+        reading_id: str,
+        payment_ref: Optional[str],
+    ) -> Optional[dict]:
         obj = _get(session, reading_id)
         if not obj:
             return None
@@ -98,7 +110,7 @@ class PersonalityRepo:
         if not obj:
             return None
         obj.result_text = result_text
-        obj.status = "done"  # ✅ completed yerine done
+        obj.status = "done"  # ✅ done kullanıyoruz (generate tarafı done/completed ikisini de kabul ediyor)
         return _dump(_commit(session, obj))
 
     def set_rating(self, *, session: Session, reading_id: str, rating: int) -> Optional[dict]:

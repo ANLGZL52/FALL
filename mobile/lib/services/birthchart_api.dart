@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../models/birthchart_reading.dart';
+import '../services/device_id_service.dart';
 import 'api_base.dart';
 
 String _extractErrorMessage(String body) {
@@ -22,6 +23,12 @@ class BirthChartApi {
   static const Duration _defaultTimeout = Duration(seconds: 30);
   static const Duration _generateTimeout = Duration(seconds: 150);
 
+  static Future<String> _device(String? deviceId) async {
+    final d = (deviceId ?? '').trim();
+    if (d.isNotEmpty) return d;
+    return DeviceIdService.getOrCreate();
+  }
+
   static Future<BirthChartReading> start({
     required String name,
     required String birthDate,
@@ -32,10 +39,12 @@ class BirthChartApi {
     String? question,
     String? deviceId,
   }) async {
+    final d = await _device(deviceId);
+
     final res = await http
         .post(
           _u('/birthchart/start'),
-          headers: ApiBase.headers(deviceId: deviceId),
+          headers: ApiBase.headers(deviceId: d),
           body: jsonEncode({
             "name": name,
             "birth_date": birthDate,
@@ -59,6 +68,8 @@ class BirthChartApi {
     String? paymentRef,
     String? deviceId,
   }) async {
+    final d = await _device(deviceId);
+
     final ref = (paymentRef ?? '').trim();
     if (ref.isNotEmpty && !ref.startsWith("TEST-")) {
       throw Exception("markPaid legacy only. Real payments use /payments/verify.");
@@ -67,7 +78,7 @@ class BirthChartApi {
     final res = await http
         .post(
           _u('/birthchart/$readingId/mark-paid'),
-          headers: ApiBase.headers(deviceId: deviceId),
+          headers: ApiBase.headers(deviceId: d),
           body: jsonEncode({"payment_ref": paymentRef}),
         )
         .timeout(_defaultTimeout);
@@ -82,10 +93,12 @@ class BirthChartApi {
     required String readingId,
     String? deviceId,
   }) async {
+    final d = await _device(deviceId);
+
     final res = await http
         .post(
           _u('/birthchart/$readingId/generate'),
-          headers: ApiBase.headers(deviceId: deviceId),
+          headers: ApiBase.headers(deviceId: d),
         )
         .timeout(_generateTimeout);
 
@@ -99,10 +112,12 @@ class BirthChartApi {
     required String readingId,
     String? deviceId,
   }) async {
+    final d = await _device(deviceId);
+
     final res = await http
         .get(
           _u('/birthchart/$readingId'),
-          headers: ApiBase.headers(deviceId: deviceId),
+          headers: ApiBase.headers(deviceId: d),
         )
         .timeout(_defaultTimeout);
 
