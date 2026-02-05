@@ -1,20 +1,23 @@
+// mobile/lib/features/personality/personality_result_screen.dart
+import 'dart:async';
 import 'dart:io';
+
 import 'package:flutter/material.dart';
-import 'package:lunaura/widgets/mystic_scaffold.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:open_filex/open_filex.dart';
 
 import '../../services/device_id_service.dart';
 import '../../services/personality_api.dart';
+import '../../widgets/glass_card.dart';
+import '../../widgets/gradient_button.dart';
+import '../../widgets/mystic_scaffold.dart';
+import '../home/home_screen.dart';
 
 class PersonalityResultScreen extends StatefulWidget {
-  final PersonalityReading reading;
-  final String title;
+  final String readingId;
 
   const PersonalityResultScreen({
     super.key,
-    required this.reading,
-    this.title = "Kişilik Analizi",
+    required this.readingId,
   });
 
   @override
@@ -22,282 +25,311 @@ class PersonalityResultScreen extends StatefulWidget {
 }
 
 class _PersonalityResultScreenState extends State<PersonalityResultScreen> {
-  bool _downloading = false;
-  bool _retrying = false;
-  bool _ratingSending = false;
+  bool _loading = true;
+  PersonalityReading? _reading;
+  String? _lastError;
 
   int? _selectedRating;
 
-  String get _resultText => (widget.reading.resultText ?? "").trim();
+  Timer? _pollTimer;
+  int _pollTicks = 0;
 
-  Future<void> _downloadPdf() async {
-    setState(() => _downloading = true);
-    try {
-      final deviceId = await DeviceIdService.getOrCreate();
+  static const Duration _pollEvery = Duration(seconds: 2);
+  static const int _maxPollTicks = 60; // ~120 sn
 
-      final bytes = await PersonalityApi.downloadPdfBytes(
-        readingId: widget.reading.id,
-        deviceId: deviceId,
-      );
-
-      final dir = await getApplicationDocumentsDirectory();
-      final file = File("${dir.path}/personality_${widget.reading.id}.pdf");
-      await file.writeAsBytes(bytes, flush: true);
-
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("PDF kaydedildi: ${file.path}"),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-
-      await OpenFilex.open(file.path);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("PDF indirilemedi: $e"), behavior: SnackBarBehavior.floating),
-      );
-    } finally {
-      if (mounted) setState(() => _downloading = false);
-    }
+  void _goHome() {
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const HomeScreen()),
+      (route) => false,
+    );
   }
 
-  Future<void> _retryGenerate() async {
-    setState(() => _retrying = true);
-    try {
-      final deviceId = await DeviceIdService.getOrCreate();
-
-      // backend idempotent: completed ise direkt döner
-      final updated = await PersonalityApi.generate(
-        readingId: widget.reading.id,
-        deviceId: deviceId,
-      );
-
-      if (!mounted) return;
-
-      // aynı ekranı yeni veriyle yenile
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => PersonalityResultScreen(
-            reading: updated,
-            title: widget.title,
-          ),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Tekrar denenemedi: $e"), behavior: SnackBarBehavior.floating),
-      );
-    } finally {
-      if (mounted) setState(() => _retrying = false);
-    }
+  @override
+  void initState() {
+    super.initState();
+    _load();
   }
 
-  Future<void> _sendRating(int rating) async {
+  @override
+  void dispose() {
+    _stopPolling();
+    super.dispose();
+  }
+
+  void _stopPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    _pollTicks = 0;
+  }
+
+  bool _shouldPoll(PersonalityReading r) {
+    final status = r.status.toLowerCase().trim();
+    final result = (r.resultText ?? '').trim();
+
+    if (result.isNotEmpty && (status == 'done' || status == 'completed')) return false;
+
+    // processing / paid iken boşsa poll
+    if (result.isEmpty && (status == 'processing' || status == 'paid' || status == 'created' || status == 'started')) {
+      return true;
+    }
+
+    // status gelmese bile sonuç boşsa poll edelim
+    if (result.isEmpty) return true;
+
+    return false;
+  }
+
+  Future<void> _load() async {
+    _stopPolling();
     setState(() {
-      _ratingSending = true;
-      _selectedRating = rating;
+      _loading = true;
+      _lastError = null;
     });
 
     try {
       final deviceId = await DeviceIdService.getOrCreate();
 
-      await PersonalityApi.rate(
-        readingId: widget.reading.id,
-        rating: rating,
-        deviceId: deviceId,
-      );
+      // 1) detail al
+      var r = await PersonalityApi.detail(readingId: widget.readingId, deviceId: deviceId);
+
+      // 2) Eğer sonuç yoksa generate tetiklemeyi deneyebiliriz (idempotent)
+      final result = (r.resultText ?? '').trim();
+      if (result.isEmpty) {
+        try {
+          await PersonalityApi.generate(readingId: widget.readingId, deviceId: deviceId);
+        } catch (_) {
+          // 402 vs olabilir; yine de polling ile görebiliriz
+        }
+      }
+
+      // 3) tekrar detail
+      r = await PersonalityApi.detail(readingId: widget.readingId, deviceId: deviceId);
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Teşekkürler! Puanın kaydedildi."), behavior: SnackBarBehavior.floating),
-      );
+      setState(() {
+        _reading = r;
+        _selectedRating = r.rating;
+      });
+
+      if (_shouldPoll(r)) _startPolling();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Puan gönderilemedi: $e"), behavior: SnackBarBehavior.floating),
-      );
-      // başarısızsa seçimi geri al
-      if (mounted) setState(() => _selectedRating = null);
+      setState(() {
+        _reading = null;
+        _lastError = '$e';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
     } finally {
-      if (mounted) setState(() => _ratingSending = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
-  void _goHome() {
-    Navigator.of(context).pushNamedAndRemoveUntil('/home', (r) => false);
+  void _startPolling() {
+    _stopPolling();
+    _pollTimer = Timer.periodic(_pollEvery, (_) async {
+      if (!mounted) return;
+
+      _pollTicks += 1;
+      if (_pollTicks >= _maxPollTicks) {
+        _stopPolling();
+        setState(() {
+          _lastError = _lastError ?? 'Analiz biraz uzun sürdü. Yenile ile tekrar dene.';
+        });
+        return;
+      }
+
+      try {
+        final deviceId = await DeviceIdService.getOrCreate();
+        final r = await PersonalityApi.detail(readingId: widget.readingId, deviceId: deviceId);
+
+        if (!mounted) return;
+
+        setState(() {
+          _reading = r;
+          _selectedRating = r.rating;
+        });
+
+        if (!_shouldPoll(r)) {
+          _stopPolling();
+        }
+      } catch (e) {
+        // ağ dalgalanması → poll devam
+      }
+    });
   }
 
-  Widget _ratingStars() {
-    final current = _selectedRating ?? widget.reading.rating;
+  Future<void> _rate(int rating) async {
+    try {
+      final deviceId = await DeviceIdService.getOrCreate();
+      await PersonalityApi.rate(readingId: widget.readingId, rating: rating, deviceId: deviceId);
 
+      setState(() => _selectedRating = rating);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Puanın alındı ✨')));
+
+      await Future.delayed(const Duration(milliseconds: 600));
+      if (mounted) _goHome();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+    }
+  }
+
+  Widget _ratingRow() {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
       children: List.generate(5, (i) {
-        final idx = i + 1;
-        final filled = (current ?? 0) >= idx;
-
+        final v = i + 1;
+        final selected = (_selectedRating ?? 0) >= v;
         return IconButton(
-          onPressed: (_ratingSending || _resultText.isEmpty) ? null : () => _sendRating(idx),
-          icon: Icon(
-            filled ? Icons.star_rounded : Icons.star_outline_rounded,
-            color: filled ? const Color(0xFFF5C361) : Colors.white70,
-          ),
-          tooltip: "$idx/5",
+          onPressed: () => _rate(v),
+          icon: Icon(selected ? Icons.star : Icons.star_border),
         );
       }),
     );
   }
 
+  Future<void> _downloadPdf() async {
+    try {
+      final deviceId = await DeviceIdService.getOrCreate();
+      final bytes = await PersonalityApi.downloadPdfBytes(readingId: widget.readingId, deviceId: deviceId);
+
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/personality_${widget.readingId}.pdf');
+      await file.writeAsBytes(bytes, flush: true);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('PDF indirildi: ${file.path}')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('PDF Hatası: $e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final status = (widget.reading.status).toString();
+    final r = _reading;
+    final result = (r?.resultText ?? '').trim();
+    final status = (r?.status ?? '').toLowerCase().trim();
 
-    final showRetry = _resultText.isEmpty || status == "paid" || status == "processing";
+    final waiting = r != null && result.isEmpty && (status == 'processing' || status == 'paid' || status == 'created' || status == 'started');
 
     return PopScope(
       canPop: false,
+      onPopInvoked: (_) => _goHome(),
       child: MysticScaffold(
-        scrimOpacity: 0.62,
-        patternOpacity: 0.22,
+        scrimOpacity: 0.82,
+        patternOpacity: 0.18,
+        appBar: AppBar(
+          title: const Text('Kişilik Analizi'),
+          automaticallyImplyLeading: false,
+          actions: [
+            IconButton(
+              tooltip: 'Yenile',
+              onPressed: _loading ? null : _load,
+              icon: const Icon(Icons.refresh),
+            ),
+            IconButton(
+              tooltip: 'Ana Sayfa',
+              onPressed: _goHome,
+              icon: const Icon(Icons.home_rounded),
+            ),
+          ],
+        ),
         body: SafeArea(
-          child: Column(
-            children: [
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  const SizedBox(width: 52),
-                  Expanded(
-                    child: Text(
-                      widget.title,
-                      style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900),
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  IconButton(
-                    onPressed: _downloading ? null : _downloadPdf,
-                    icon: _downloading
-                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.picture_as_pdf_outlined, color: Colors.white),
-                    tooltip: "PDF indir",
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-
-              // ✅ mini durum satırı
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 18),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    "Durum: $status",
-                    style: TextStyle(color: Colors.white.withOpacity(0.70), fontSize: 12),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 18),
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.45),
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: Colors.white12),
-                    ),
-                    child: SingleChildScrollView(
-                      child: Text(
-                        _resultText.isEmpty
-                            ? "Yorum henüz hazır değil.\n\n"
-                                "Eğer ödeme aldıysan ama burada boş görüyorsan, aşağıdan Tekrar Dene’ye bas."
-                            : _resultText,
-                        style: const TextStyle(color: Colors.white, height: 1.35),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : (r == null)
+                    ? Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(_lastError == null ? 'Veri bulunamadı.' : 'Veri alınamadı.'),
+                          if (_lastError != null) ...[
+                            const SizedBox(height: 10),
+                            Text(
+                              _lastError!,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          ],
+                          const SizedBox(height: 12),
+                          GradientButton(text: 'Tekrar Dene', onPressed: _load),
+                          const SizedBox(height: 10),
+                          GradientButton(text: 'Ana Sayfaya Dön', onPressed: _goHome),
+                        ],
+                      )
+                    : Column(
+                        children: [
+                          Expanded(
+                            child: ListView(
+                              children: [
+                                GlassCard(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        '${r.name} ✨',
+                                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text('Doğum: ${r.birthDate} ${r.birthTime ?? ""}'.trim()),
+                                      const SizedBox(height: 6),
+                                      Text('Yer: ${r.birthCity}, ${r.birthCountry}'),
+                                      const SizedBox(height: 10),
+                                      const Divider(),
+                                      const SizedBox(height: 10),
+                                      if (waiting) ...[
+                                        const Text('Analiz hazırlanıyor...'),
+                                        const SizedBox(height: 10),
+                                        const Center(child: CircularProgressIndicator()),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          'Otomatik kontrol: $_pollTicks/$_maxPollTicks',
+                                          style: const TextStyle(fontSize: 12),
+                                        ),
+                                      ] else
+                                        Text(
+                                          result.isEmpty ? 'Yorum bulunamadı.' : result,
+                                          style: const TextStyle(height: 1.42),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 14),
+                                if (!waiting && result.isNotEmpty) ...[
+                                  GlassCard(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        const Text('PDF', style: TextStyle(fontWeight: FontWeight.w900)),
+                                        const SizedBox(height: 10),
+                                        GradientButton(text: 'PDF İndir', onPressed: _downloadPdf),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 14),
+                                  GlassCard(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        const Text('Değerlendir', style: TextStyle(fontWeight: FontWeight.w900)),
+                                        const SizedBox(height: 8),
+                                        _ratingRow(),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          GradientButton(text: 'Ana Sayfaya Dön', onPressed: _goHome),
+                        ],
                       ),
-                    ),
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 10),
-
-              // ✅ rating
-              if (_resultText.isNotEmpty) ...[
-                Text("Bu analizi puanla", style: TextStyle(color: Colors.white.withOpacity(0.85), fontWeight: FontWeight.w800)),
-                const SizedBox(height: 2),
-                _ratingStars(),
-              ],
-
-              const SizedBox(height: 6),
-
-              // ✅ Retry butonu (boş / paid / processing)
-              if (showRetry)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
-                  child: SizedBox(
-                    width: double.infinity,
-                    height: 56,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white.withOpacity(0.10),
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        side: const BorderSide(color: Colors.white12),
-                      ),
-                      onPressed: (_retrying || _downloading) ? null : _retryGenerate,
-                      child: _retrying
-                          ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
-                          : const Text("Tekrar Dene (Yorumu Üret)", style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900)),
-                    ),
-                  ),
-                ),
-
-              // ✅ PDF indir
-              Padding(
-                padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white.withOpacity(0.10),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      side: const BorderSide(color: Colors.white12),
-                    ),
-                    onPressed: _downloading ? null : _downloadPdf,
-                    child: _downloading
-                        ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Text("PDF İndir", style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900)),
-                  ),
-                ),
-              ),
-
-              // ✅ home
-              Padding(
-                padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFF5C361),
-                      foregroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    ),
-                    onPressed: _goHome,
-                    child: const Text("Ana Sayfaya Dön", style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900)),
-                  ),
-                ),
-              ),
-            ],
           ),
         ),
       ),
