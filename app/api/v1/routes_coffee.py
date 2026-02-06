@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import List, Optional
+from typing import List
 from datetime import datetime
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
@@ -21,7 +21,14 @@ from app.repositories.coffee_repo import (
     set_status,
 )
 from app.services.storage import save_uploads
-from app.services.openai_service import generate_fortune, validate_coffee_images
+from app.services.openai_service import (
+    generate_fortune,
+    validate_coffee_images,
+    AIInsufficientQuotaError,
+    AIServiceUnavailableError,
+    AIServiceError,
+)
+
 from app.schemas.coffee import CoffeeStartRequest, CoffeeReading
 
 router = APIRouter(prefix="/coffee", tags=["coffee"])
@@ -126,8 +133,29 @@ async def upload_images(
 
     saved = await save_uploads(reading_id, files)
 
-    verdict = validate_coffee_images(saved)
+    # ✅ Upload aşamasında AI doğrulama başarısız olursa 500 değil doğru kod dönelim.
+    # ✅ Quota/servis hatasında dosyaları silmiyoruz (kullanıcı daha sonra tekrar deneyebilir).
+    try:
+        verdict = validate_coffee_images(saved)
+    except AIInsufficientQuotaError:
+        # 429 quota/billing -> 503
+        raise HTTPException(
+            status_code=503,
+            detail="AI servis kotası şu anda yetersiz (billing/quota). Lütfen daha sonra tekrar dene.",
+        )
+    except AIServiceUnavailableError:
+        raise HTTPException(
+            status_code=503,
+            detail="AI servisi geçici olarak yoğun/ulaşılamıyor. Lütfen biraz sonra tekrar dene.",
+        )
+    except AIServiceError:
+        raise HTTPException(
+            status_code=503,
+            detail="AI servisinde beklenmeyen bir sorun oluştu. Lütfen daha sonra tekrar dene.",
+        )
+
     if not verdict.get("ok"):
+        # ✅ Bu gerçek bir doğrulama reddi -> burada dosyaları silmek mantıklı
         _delete_paths(saved)
         raise HTTPException(
             status_code=400,
@@ -160,19 +188,40 @@ async def generate(
     if not r.is_paid:
         raise HTTPException(status_code=402, detail="Payment Required")
 
+    # zaten üretildiyse dön
     if r.result_text:
         return _to_schema(r)
 
+    # zaten işlemdeyse dön
     if r.status == "processing":
         return _to_schema(r)
 
-    verdict = validate_coffee_images(photos)
+    # ✅ Generate öncesi ikinci doğrulama
+    try:
+        verdict = validate_coffee_images(photos)
+    except AIInsufficientQuotaError:
+        raise HTTPException(
+            status_code=503,
+            detail="AI servis kotası şu anda yetersiz (billing/quota). Lütfen daha sonra tekrar dene.",
+        )
+    except AIServiceUnavailableError:
+        raise HTTPException(
+            status_code=503,
+            detail="AI servisi geçici olarak yoğun/ulaşılamıyor. Lütfen biraz sonra tekrar dene.",
+        )
+    except AIServiceError:
+        raise HTTPException(
+            status_code=503,
+            detail="AI servisinde beklenmeyen bir sorun oluştu. Lütfen daha sonra tekrar dene.",
+        )
+
     if not verdict.get("ok"):
         raise HTTPException(
             status_code=400,
             detail="Lütfen sadece kahve fincanı içi fotoğrafı yükleyin.",
         )
 
+    # ✅ artık üretime geçiyoruz
     set_status(session, reading_id, "processing")
 
     try:
@@ -189,7 +238,30 @@ async def generate(
         r = set_status(session, reading_id, "completed", comment=text)
         return _to_schema(r)
 
+    except AIInsufficientQuotaError:
+        # ✅ processing'de kalmasın
+        set_status(session, reading_id, "paid")
+        raise HTTPException(
+            status_code=503,
+            detail="AI servis kotası şu anda yetersiz (billing/quota). Lütfen daha sonra tekrar dene.",
+        )
+
+    except AIServiceUnavailableError:
+        set_status(session, reading_id, "paid")
+        raise HTTPException(
+            status_code=503,
+            detail="AI servisi geçici olarak yoğun/ulaşılamıyor. Lütfen biraz sonra tekrar dene.",
+        )
+
+    except AIServiceError:
+        set_status(session, reading_id, "paid")
+        raise HTTPException(
+            status_code=503,
+            detail="AI servisinde beklenmeyen bir sorun oluştu. Lütfen daha sonra tekrar dene.",
+        )
+
     except Exception as e:
+        # ✅ processing'de kalmasın
         set_status(session, reading_id, "paid")
         raise HTTPException(
             status_code=500,

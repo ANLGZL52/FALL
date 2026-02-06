@@ -2,7 +2,8 @@ name: lunaura
 description: "A new Flutter project."
 publish_to: 'none'
 
-version: 1.0.0+18
+# 🔴 Play Store update için +1 artıracağız (bir sonraki adımda)
+version: 1.0.0+19
 
 environment:
   sdk: ^3.9.2
@@ -45,8 +46,29 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^5.0.0
 
+  # ✅ APP ICON (ANA EKRAN İKONU)
+  flutter_launcher_icons: ^0.14.4
+
+  # ✅ SPLASH (istersen kullanacağız)
+  flutter_native_splash: ^2.4.1
+
 flutter:
   uses-material-design: true
   assets:
     - assets/backgrounds/ChatGPT Image 3 Oca 2026 18_20_30.png
+    - assets/legal/
     - assets/tarot/cards/
+    - assets/icon/
+
+# 🔵 ANA EKRAN UYGULAMA İKONU AYARI
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: assets/icon/icon.png
+
+# 🟣 SPLASH EKRANI AYARI (şimdilik hazır, birazdan çalıştıracağız)
+flutter_native_splash:
+  color: "#000000"
+  image: assets/icon/icon.png
+  android: true
+  ios: true

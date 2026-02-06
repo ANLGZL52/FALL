@@ -6,6 +6,24 @@ import '../models/coffee_reading.dart';
 import 'api_base.dart';
 import 'device_id_service.dart';
 
+/// ✅ Tipli hata: UI tarafı statusCode'a göre mesaj gösterebilsin
+class ApiException implements Exception {
+  final int statusCode;
+  final String message;
+  final String endpoint;
+  final String? rawBody;
+
+  ApiException({
+    required this.statusCode,
+    required this.message,
+    required this.endpoint,
+    this.rawBody,
+  });
+
+  @override
+  String toString() => '$endpoint failed: $statusCode / $message';
+}
+
 class CoffeeApi {
   static String get _base => ApiBase.baseUrl;
 
@@ -16,19 +34,43 @@ class CoffeeApi {
   static String _extractErrorMessage(String body) {
     try {
       final decoded = jsonDecode(body);
+
+      // FastAPI standard: {"detail": "..."} veya {"detail": {"...": ...}}
       if (decoded is Map<String, dynamic>) {
         final detail = decoded['detail'];
-        if (detail is String && detail.trim().isNotEmpty) return detail;
+
+        if (detail is String && detail.trim().isNotEmpty) return detail.trim();
+        if (detail != null) return detail.toString();
+
+        // fallback: error alanı varsa
+        final err = decoded['error'];
+        if (err != null) return err.toString();
+
         return decoded.toString();
       }
-    } catch (_) {}
-    return body;
+
+      return decoded.toString();
+    } catch (_) {
+      // body JSON değilse düz string
+      final t = body.trim();
+      return t.isEmpty ? 'Unknown error' : t;
+    }
   }
 
   static Future<String> _resolveDeviceId(String? deviceId) async {
     final d = (deviceId ?? '').trim();
     if (d.isNotEmpty) return d;
     return await DeviceIdService.getOrCreate();
+  }
+
+  static Never _throwApi(String endpoint, http.Response res) {
+    final msg = _extractErrorMessage(res.body);
+    throw ApiException(
+      statusCode: res.statusCode,
+      message: msg,
+      endpoint: endpoint,
+      rawBody: res.body,
+    );
   }
 
   static Future<CoffeeReading> start({
@@ -61,7 +103,7 @@ class CoffeeApi {
         .timeout(_defaultTimeout);
 
     if (res.statusCode != 200) {
-      throw Exception('coffee/start failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
+      _throwApi('coffee/start', res);
     }
 
     return CoffeeReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
@@ -77,7 +119,7 @@ class CoffeeApi {
     final uri = Uri.parse('$_base/coffee/$readingId/upload-images');
     final req = http.MultipartRequest('POST', uri);
 
-    // ✅ middleware tüm endpointlerde device id isteyebilir
+    // ✅ device id header
     req.headers.addAll({
       "Accept": "application/json",
       "X-Device-Id": did,
@@ -91,7 +133,7 @@ class CoffeeApi {
     final res = await http.Response.fromStream(streamed);
 
     if (res.statusCode != 200) {
-      throw Exception('coffee/upload-images failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
+      _throwApi('coffee/upload-images', res);
     }
 
     return CoffeeReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
@@ -105,7 +147,11 @@ class CoffeeApi {
   }) {
     final chosen = (files != null && files.isNotEmpty) ? files : (imageFiles ?? <File>[]);
     if (chosen.isEmpty) {
-      throw Exception('uploadPhotos failed: files/imageFiles is empty');
+      throw ApiException(
+        statusCode: 0,
+        message: 'Foto seçilmedi.',
+        endpoint: 'coffee/upload-photos',
+      );
     }
     return uploadImages(readingId: readingId, files: chosen, deviceId: deviceId);
   }
@@ -120,7 +166,11 @@ class CoffeeApi {
 
     final ref = (paymentRef ?? '').trim();
     if (ref.isNotEmpty && !ref.startsWith("TEST-")) {
-      throw Exception("markPaid legacy only. Real payments use /payments/verify.");
+      throw ApiException(
+        statusCode: 400,
+        message: "markPaid legacy only. Real payments use /payments/verify.",
+        endpoint: 'coffee/mark-paid',
+      );
     }
 
     final uri = Uri.parse('$_base/coffee/$readingId/mark-paid');
@@ -134,7 +184,7 @@ class CoffeeApi {
         .timeout(_defaultTimeout);
 
     if (res.statusCode != 200) {
-      throw Exception('coffee/mark-paid failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
+      _throwApi('coffee/mark-paid', res);
     }
 
     return CoffeeReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
@@ -156,7 +206,7 @@ class CoffeeApi {
         .timeout(_generateTimeout);
 
     if (res.statusCode != 200) {
-      throw Exception('coffee/generate failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
+      _throwApi('coffee/generate', res);
     }
 
     return CoffeeReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
@@ -178,7 +228,7 @@ class CoffeeApi {
         .timeout(_defaultTimeout);
 
     if (res.statusCode != 200) {
-      throw Exception('coffee/detail failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
+      _throwApi('coffee/detail', res);
     }
 
     return CoffeeReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
@@ -200,7 +250,7 @@ class CoffeeApi {
         .timeout(_defaultTimeout);
 
     if (res.statusCode != 200) {
-      throw Exception('coffee/detail failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
+      _throwApi('coffee/detail', res);
     }
 
     return jsonDecode(res.body) as Map<String, dynamic>;
@@ -224,7 +274,7 @@ class CoffeeApi {
         .timeout(_defaultTimeout);
 
     if (res.statusCode != 200) {
-      throw Exception('coffee/rate failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}');
+      _throwApi('coffee/rate', res);
     }
 
     return CoffeeReading.fromJson(jsonDecode(res.body) as Map<String, dynamic>);

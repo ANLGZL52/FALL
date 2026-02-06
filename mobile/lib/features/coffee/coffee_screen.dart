@@ -31,11 +31,9 @@ class _CoffeeScreenState extends State<CoffeeScreen> {
 
   bool _loading = false;
 
-  // ✅ Profil otomatik doldurma kontrolü (İsim)
   bool _nameDirty = false;
   bool _nameAppliedOnce = false;
 
-  // ✅ Profil otomatik doldurma kontrolü (Yaş)
   bool _ageDirty = false;
   bool _ageAppliedOnce = false;
 
@@ -43,13 +41,8 @@ class _CoffeeScreenState extends State<CoffeeScreen> {
   void initState() {
     super.initState();
 
-    _nameController.addListener(() {
-      _nameDirty = true;
-    });
-
-    _ageController.addListener(() {
-      _ageDirty = true;
-    });
+    _nameController.addListener(() => _nameDirty = true);
+    _ageController.addListener(() => _ageDirty = true);
 
     _bootProfileForCoffee();
   }
@@ -58,7 +51,6 @@ class _CoffeeScreenState extends State<CoffeeScreen> {
     try {
       await ProfileStore.instance.init(alsoSyncServer: true);
       ProfileStore.instance.addListener(_onProfileChanged);
-
       _applyFromProfile(force: true);
     } catch (_) {
       // offline vs sessiz geç
@@ -74,7 +66,6 @@ class _CoffeeScreenState extends State<CoffeeScreen> {
     final s = (birthDate ?? '').trim();
     if (s.isEmpty) return null;
 
-    // YYYY-MM-DD bekliyoruz
     final parts = s.split('-');
     if (parts.length != 3) return null;
 
@@ -86,7 +77,6 @@ class _CoffeeScreenState extends State<CoffeeScreen> {
     final now = DateTime.now();
     int age = now.year - y;
 
-    // bu yıl doğum günü geldi mi?
     final birthdayThisYear = DateTime(now.year, m, d);
     if (now.isBefore(birthdayThisYear)) {
       age -= 1;
@@ -100,7 +90,6 @@ class _CoffeeScreenState extends State<CoffeeScreen> {
     final me = ProfileStore.instance.me;
     if (me == null) return;
 
-    // ---------- İSİM ----------
     if (force || (!_nameDirty && !_nameAppliedOnce)) {
       final name = me.displayName.trim();
       if (name.isNotEmpty && name != 'Misafir') {
@@ -109,14 +98,12 @@ class _CoffeeScreenState extends State<CoffeeScreen> {
         }
       }
       _nameAppliedOnce = true;
-      _nameDirty = false; // store bastıysak dirty sayma
+      _nameDirty = false;
     }
 
-    // ---------- YAŞ ----------
     if (force || (!_ageDirty && !_ageAppliedOnce)) {
       final computedAge = _ageFromBirthDate(me.birthDate);
       if (computedAge != null) {
-        // age alanı boşsa veya force ise doldur
         if (_ageController.text.trim().isEmpty || force) {
           _ageController.text = computedAge.toString();
         }
@@ -160,13 +147,57 @@ class _CoffeeScreenState extends State<CoffeeScreen> {
 
   void _removePhoto(int index) => setState(() => _photos.removeAt(index));
 
+  void _showSnack(String text) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(text)),
+    );
+  }
+
+  String _friendlyMessageFromApiError(ApiException e) {
+    // Öncelik: backend detail gerçekten kullanıcı mesajıysa göster
+    final detail = e.message.trim();
+
+    if (e.statusCode == 400) {
+      // Foto doğrulama gibi şeylerde backend'in mesajı en iyi mesajdır
+      return detail.isNotEmpty ? detail : 'Geçersiz istek.';
+    }
+
+    if (e.statusCode == 402) {
+      return 'Ödeme gerekli. Lütfen ödemeyi tamamla.';
+    }
+
+    if (e.statusCode == 403) {
+      return 'Bu işlem için yetki yok.';
+    }
+
+    if (e.statusCode == 404) {
+      return 'Kayıt bulunamadı. Lütfen tekrar dene.';
+    }
+
+    if (e.statusCode == 503) {
+      // Senin log’daki senaryo: quota bitti / AI geçici unavailable
+      // Backend detail: "OpenAI quota/billing yetersiz." gibi gelecek
+      if (detail.toLowerCase().contains('quota') ||
+          detail.toLowerCase().contains('billing') ||
+          detail.toLowerCase().contains('kota')) {
+        return 'AI kotası şu an dolu. Biraz sonra tekrar dene.';
+      }
+      return 'AI şu an kullanılamıyor. Biraz sonra tekrar dene.';
+    }
+
+    if (e.statusCode >= 500) {
+      return 'Sunucuda geçici bir sorun var. Biraz sonra tekrar dene.';
+    }
+
+    // fallback
+    return detail.isNotEmpty ? detail : 'Bir hata oluştu. Lütfen tekrar dene.';
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
     if (_photos.length < 3 || _photos.length > 5) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Lütfen 3 ile 5 fotoğraf ekle.')),
-      );
+      _showSnack('Lütfen 3 ile 5 fotoğraf ekle.');
       return;
     }
 
@@ -193,9 +224,12 @@ class _CoffeeScreenState extends State<CoffeeScreen> {
       Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => CoffeePaymentScreen(readingId: reading.id)),
       );
-    } catch (e) {
+    } on ApiException catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+      _showSnack(_friendlyMessageFromApiError(e));
+    } catch (_) {
+      if (!mounted) return;
+      _showSnack('Beklenmeyen bir hata oluştu. Lütfen tekrar dene.');
     } finally {
       if (mounted) setState(() => _loading = false);
     }

@@ -6,10 +6,123 @@ import json
 import os
 import re
 from datetime import date, timedelta
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable, TypeVar, cast
 
 from openai import OpenAI
+
+# ✅ OpenAI error types (SDK v1)
+try:
+    from openai import (
+        APIConnectionError,
+        APITimeoutError,
+        APIStatusError,
+        RateLimitError,
+        BadRequestError,
+        AuthenticationError,
+        PermissionDeniedError,
+        NotFoundError,
+        ConflictError,
+        UnprocessableEntityError,
+        InternalServerError,
+    )
+except Exception:  # pragma: no cover
+    APIConnectionError = Exception
+    APITimeoutError = Exception
+    APIStatusError = Exception
+    RateLimitError = Exception
+    BadRequestError = Exception
+    AuthenticationError = Exception
+    PermissionDeniedError = Exception
+    NotFoundError = Exception
+    ConflictError = Exception
+    UnprocessableEntityError = Exception
+    InternalServerError = Exception
+
 from app.core.config import settings
+
+
+# ============================================================
+# ✅ Domain Exceptions (routes_* dosyaları bunları yakalayacak)
+# ============================================================
+
+class AIServiceError(RuntimeError):
+    """Genel AI servis hatası (beklenmeyen)."""
+
+
+class AIInsufficientQuotaError(AIServiceError):
+    """Billing/quota yetersiz (insufficient_quota)."""
+
+
+class AIServiceUnavailableError(AIServiceError):
+    """Geçici servis problemi (timeout, bağlantı, 5xx, rate-limit vb.)."""
+
+
+T = TypeVar("T")
+
+
+def _extract_openai_error_code(err: Exception) -> str:
+    """
+    OpenAI SDK hatalarının body/json alanlarından 'code' yakalamaya çalışır.
+    Örn: insufficient_quota, rate_limit_exceeded vb.
+    """
+    code = ""
+    try:
+        body = getattr(err, "body", None)
+        if isinstance(body, dict):
+            code = str(body.get("error", {}).get("code") or body.get("code") or "").strip()
+    except Exception:
+        pass
+
+    if code:
+        return code
+
+    try:
+        msg = str(err)
+        m = re.search(r"'code'\s*:\s*'([^']+)'", msg)
+        if m:
+            return m.group(1).strip()
+    except Exception:
+        pass
+
+    return ""
+
+
+def _wrap_openai_errors(fn: Callable[[], T]) -> T:
+    """
+    OpenAI çağrılarını sarar:
+    - insufficient_quota => AIInsufficientQuotaError
+    - timeout/connection/5xx/429 => AIServiceUnavailableError
+    - diğer => AIServiceError
+    """
+    try:
+        return fn()
+
+    except RateLimitError as e:
+        code = _extract_openai_error_code(e)
+        if code == "insufficient_quota":
+            raise AIInsufficientQuotaError("OpenAI quota/billing yetersiz.") from e
+        raise AIServiceUnavailableError("OpenAI rate limit / geçici yoğunluk.") from e
+
+    except (APITimeoutError, APIConnectionError) as e:
+        raise AIServiceUnavailableError("OpenAI bağlantı/timeout.") from e
+
+    except APIStatusError as e:
+        status = getattr(e, "status_code", None)
+        if status in (500, 502, 503, 504):
+            raise AIServiceUnavailableError(f"OpenAI geçici servis hatası ({status}).") from e
+        raise AIServiceError(f"OpenAI status error ({status}).") from e
+
+    except (AuthenticationError, PermissionDeniedError) as e:
+        raise AIServiceError("OpenAI authentication/permission hatası (API key/izin).") from e
+
+    except (BadRequestError, UnprocessableEntityError, NotFoundError, ConflictError) as e:
+        raise AIServiceError(f"OpenAI request hatası: {e}") from e
+
+    except InternalServerError as e:
+        raise AIServiceUnavailableError("OpenAI internal server error.") from e
+
+    except Exception as e:
+        raise AIServiceError(f"OpenAI beklenmeyen hata: {e}") from e
 
 
 # ============================================================
@@ -53,12 +166,6 @@ def _make_client() -> OpenAI:
 
 
 def _text_model_name() -> str:
-    """
-    Config uyumsuzluklarına dayanıklı:
-    - settings.openai_model varsa onu kullanır (OPENAI_MODEL)
-    - yoksa settings.openai_model_text varsa onu kullanır (OPENAI_MODEL_TEXT)
-    - ikisi de yoksa fallback
-    """
     m = (getattr(settings, "openai_model", "") or "").strip()
     if m:
         return m
@@ -75,10 +182,6 @@ def _vision_model_name() -> str:
 
 
 def _max_output_tokens(default: int = 2500) -> int:
-    """
-    Uzun metin için.
-    .env -> OPENAI_MAX_OUTPUT_TOKENS=3000 gibi ayarlanabilir.
-    """
     v = getattr(settings, "openai_max_output_tokens", None)
     try:
         if v is None:
@@ -121,12 +224,10 @@ def _to_data_url(path: str) -> str:
 
 
 def _parse_json_object(text: str) -> Optional[dict]:
-    """Model bazen JSON dışı yazarsa yakalamaya çalışır."""
     if not text:
         return None
     t = text.strip()
 
-    # direct
     try:
         obj = json.loads(t)
         if isinstance(obj, dict):
@@ -134,7 +235,6 @@ def _parse_json_object(text: str) -> Optional[dict]:
     except Exception:
         pass
 
-    # substring
     start = t.find("{")
     end = t.rfind("}")
     if start != -1 and end != -1 and end > start:
@@ -150,10 +250,6 @@ def _parse_json_object(text: str) -> Optional[dict]:
 
 
 def _infer_spread_count(spread_type: str, selected_cards: List[str]) -> int:
-    """
-    spread_type backend'den "three/six/twelve" gelebilir.
-    Tutmazsa selected_cards uzunluğundan yakalar.
-    """
     st = (spread_type or "").lower().strip()
 
     if "three" in st or st in ("3", "3card", "3-card"):
@@ -170,15 +266,10 @@ def _infer_spread_count(spread_type: str, selected_cards: List[str]) -> int:
 
 
 def _today_str_tr() -> str:
-    # UI’da “tarih bugüne ait değil” problemini prompt’ta kökten bitiriyoruz:
     return date.today().isoformat()
 
 
 def _next_14_days_lines_tr() -> str:
-    """
-    14 günlük planı LLM'e net formatla verdiriyoruz.
-    Model artık 2024 gibi saçmalık yazmasın.
-    """
     d0 = date.today()
     lines = []
     for i in range(14):
@@ -192,60 +283,54 @@ def _next_14_days_lines_tr() -> str:
 # ============================================================
 
 def call_openai_text(*, system: str, user: str, max_output_tokens: Optional[int] = None) -> str:
-    """
-    - max_output_tokens verilmezse env/default kullanır.
-    - tek yerden token kontrolü
-    """
     client = _make_client()
     mot = _clamp_tokens(int(max_output_tokens or _max_output_tokens()))
-    resp = client.responses.create(
-        model=_text_model_name(),
-        max_output_tokens=mot,
-        input=[
-            {"role": "system", "content": [{"type": "input_text", "text": system}]},
-            {"role": "user", "content": [{"type": "input_text", "text": user}]},
-        ],
-    )
-    out = (resp.output_text or "").strip()
-    if not out:
-        raise RuntimeError("OpenAI boş yanıt döndü. (output_text empty)")
-    return out
+
+    def _do() -> str:
+        resp = client.responses.create(
+            model=_text_model_name(),
+            max_output_tokens=mot,
+            input=[
+                {"role": "system", "content": [{"type": "input_text", "text": system}]},
+                {"role": "user", "content": [{"type": "input_text", "text": user}]},
+            ],
+        )
+        out = (resp.output_text or "").strip()
+        if not out:
+            raise RuntimeError("OpenAI boş yanıt döndü. (output_text empty)")
+        return out
+
+    return _wrap_openai_errors(_do)
 
 
 # ============================================================
 # ✅ Truncation Guard (Numerology fix)
 # ============================================================
 
-_SENTENCE_END_RE = re.compile(r"[.!?…]\s*$")
+_SENTENCE_END_RE = re.compile(r"[.!?…][\"')\]]?\s*$")
 
 
 def _looks_truncated(text: str) -> bool:
-    """
-    Çok basit ama pratik bir heuristik:
-    - çok kısa
-    - cümle noktalama ile bitmiyor
-    - açıkça yarım bırakılmış gibi (son karakter virgül, iki nokta vb.)
-    """
     t = (text or "").strip()
     if not t:
         return True
     if len(t) < 300:
         return True
-
     last = t[-1]
-    if last in {",", ":", ";", "-", "(", "["}:
+    if last in {",", ":", ";", "-", "(", "[", "—"}:
         return True
-
     if not _SENTENCE_END_RE.search(t):
         return True
-
+    # Son satÄ±r kÄ±sa veya bitmemiÅŸse devam ettir.
+    last_line = t.splitlines()[-1].strip()
+    if len(last_line) < 20:
+        return True
+    if not _SENTENCE_END_RE.search(last_line):
+        return True
     return False
 
 
 def _numerology_continue_user(prev_text: str) -> str:
-    """
-    Devam prompt’u: tekrar etmesin, kaldığı yerden tamamlasın.
-    """
     return f"""
 Aşağıdaki numeroloji metni daha önce üretildi ancak muhtemelen YARIM kaldı.
 Görev:
@@ -270,11 +355,6 @@ def _stitch_with_guard(
     continue_tokens: int,
     max_hops: int = 2,
 ) -> str:
-    """
-    1) ilk üret
-    2) yarım görünüyorsa 1-2 kez "devam et" çağır
-    3) birleştir ve dön
-    """
     out = call_openai_text(system=system, user=initial_user, max_output_tokens=initial_tokens).strip()
 
     for _ in range(max_hops):
@@ -286,12 +366,10 @@ def _stitch_with_guard(
         if not nxt:
             break
 
-        # basit birleştirme
         if not out.endswith("\n"):
             out += "\n\n"
         out += nxt
 
-    # Final temizlik: çok aşırı boşlukları sadeleştir
     out = re.sub(r"\n{3,}", "\n\n", out).strip()
     return out
 
@@ -315,26 +393,30 @@ def validate_coffee_images(image_paths: List[str]) -> Dict[str, Any]:
         "JSON DIŞINDA hiçbir şey yazma."
     )
 
-    resp = client.responses.create(
-        model=_vision_model_name(),
-        input=[{"role": "user", "content": [{"type": "input_text", "text": prompt}, *images]}],
-    )
+    def _do() -> Dict[str, Any]:
+        resp = client.responses.create(
+            model=_vision_model_name(),
+            max_output_tokens=400,  # ✅ küçük yeter (JSON)
+            input=[{"role": "user", "content": [{"type": "input_text", "text": prompt}, *images]}],
+        )
 
-    raw = (resp.output_text or "").strip()
-    obj = _parse_json_object(raw)
+        raw = (resp.output_text or "").strip()
+        obj = _parse_json_object(raw)
 
-    if not obj:
-        return {"ok": False, "reason": "Görseller doğrulanamadı. Lütfen fincan içi fotoğraf yükleyin.", "confidence": 0.0}
+        if not obj:
+            return {"ok": False, "reason": "Görseller doğrulanamadı. Lütfen fincan içi fotoğraf yükleyin.", "confidence": 0.0}
 
-    ok = bool(obj.get("ok", False))
-    reason = str(obj.get("reason", "")).strip() or ("Uygun" if ok else "Görseller kahve fincanı içi değil.")
-    conf = obj.get("confidence", 0.5)
-    try:
-        conf = float(conf)
-    except Exception:
-        conf = 0.5
+        ok = bool(obj.get("ok", False))
+        reason = str(obj.get("reason", "")).strip() or ("Uygun" if ok else "Görseller kahve fincanı içi değil.")
+        conf = obj.get("confidence", 0.5)
+        try:
+            conf = float(conf)
+        except Exception:
+            conf = 0.5
 
-    return {"ok": ok, "reason": reason, "confidence": conf}
+        return {"ok": ok, "reason": reason, "confidence": conf}
+
+    return cast(Dict[str, Any], _wrap_openai_errors(_do))
 
 
 def generate_fortune(
@@ -375,17 +457,21 @@ def generate_fortune(
         "İstek: Akıcı bir fal yaz. Listeleme yapma.\n"
     )
 
-    resp = client.responses.create(
-        model=_vision_model_name(),
-        input=[
-            {"role": "system", "content": [{"type": "input_text", "text": system}]},
-            {"role": "user", "content": [{"type": "input_text", "text": user_text}, *images]}],
-    )
+    def _do() -> str:
+        resp = client.responses.create(
+            model=_vision_model_name(),
+            max_output_tokens=_clamp_tokens(_max_output_tokens(2600), 256, 4000),
+            input=[
+                {"role": "system", "content": [{"type": "input_text", "text": system}]},
+                {"role": "user", "content": [{"type": "input_text", "text": user_text}, *images]},
+            ],
+        )
+        out = (resp.output_text or "").strip()
+        if not out:
+            raise RuntimeError("OpenAI boş yanıt döndü. (output_text empty)")
+        return out
 
-    out = (resp.output_text or "").strip()
-    if not out:
-        raise RuntimeError("OpenAI boş yanıt döndü. (output_text empty)")
-    return out
+    return _wrap_openai_errors(_do)
 
 
 # ============================================================
@@ -407,45 +493,46 @@ def validate_hand_images(image_paths: List[str]) -> Dict[str, Any]:
         "JSON DIŞINDA hiçbir şey yazma."
     )
 
-    resp = client.responses.create(
-        model=_vision_model_name(),
-        input=[{"role": "user", "content": [{"type": "input_text", "text": prompt}, *images]}],
-    )
+    def _do() -> Dict[str, Any]:
+        resp = client.responses.create(
+            model=_vision_model_name(),
+            max_output_tokens=400,
+            input=[{"role": "user", "content": [{"type": "input_text", "text": prompt}, *images]}],
+        )
+        raw = (resp.output_text or "").strip()
+        obj = _parse_json_object(raw)
 
-    raw = (resp.output_text or "").strip()
-    obj = _parse_json_object(raw)
+        if not obj:
+            return {"ok": False, "reason": "Görseller doğrulanamadı. Lütfen avuç içi net fotoğraf yükle.", "confidence": 0.0}
 
-    if not obj:
-        return {"ok": False, "reason": "Görseller doğrulanamadı. Lütfen avuç içi net fotoğraf yükle.", "confidence": 0.0}
+        ok = bool(obj.get("ok", False))
+        reason = str(obj.get("reason", "")).strip() or ("Uygun" if ok else "Görseller el falı için uygun değil.")
+        conf = obj.get("confidence", 0.5)
+        try:
+            conf = float(conf)
+        except Exception:
+            conf = 0.5
 
-    ok = bool(obj.get("ok", False))
-    reason = str(obj.get("reason", "")).strip() or ("Uygun" if ok else "Görseller el falı için uygun değil.")
-    conf = obj.get("confidence", 0.5)
-    try:
-        conf = float(conf)
-    except Exception:
-        conf = 0.5
+        return {"ok": ok, "reason": reason, "confidence": conf}
 
-    return {"ok": ok, "reason": reason, "confidence": conf}
+    return cast(Dict[str, Any], _wrap_openai_errors(_do))
 
 
 def _call_openai_vision_json(*, prompt: str, image_paths: List[str], max_output_tokens: int = 1400) -> Dict[str, Any]:
-    """
-    Vision model çağrısı: SADECE JSON üretmeye zorlarız.
-    JSON parse edilemezse {} döner.
-    """
     client = _make_client()
     images = [{"type": "input_image", "image_url": _to_data_url(p)} for p in (image_paths or [])[:5]]
 
-    resp = client.responses.create(
-        model=_vision_model_name(),
-        max_output_tokens=_clamp_tokens(max_output_tokens, 256, 2500),
-        input=[{"role": "user", "content": [{"type": "input_text", "text": prompt}, *images]}],
-    )
+    def _do() -> Dict[str, Any]:
+        resp = client.responses.create(
+            model=_vision_model_name(),
+            max_output_tokens=_clamp_tokens(max_output_tokens, 256, 2500),
+            input=[{"role": "user", "content": [{"type": "input_text", "text": prompt}, *images]}],
+        )
+        raw = (resp.output_text or "").strip()
+        obj = _parse_json_object(raw)
+        return obj or {}
 
-    raw = (resp.output_text or "").strip()
-    obj = _parse_json_object(raw)
-    return obj or {}
+    return cast(Dict[str, Any], _wrap_openai_errors(_do))
 
 
 def generate_hand_fortune(
@@ -521,7 +608,7 @@ def generate_hand_fortune(
 
 
 # ============================================================
-# ✅ Tarot (text-only)
+# Tarot / Numerology / BirthChart / Personality / Synastry
 # ============================================================
 
 def generate_tarot_reading(
@@ -587,14 +674,10 @@ def generate_tarot_reading(
     return call_openai_text(system=system, user=user, max_output_tokens=_max_output_tokens(token_default))
 
 
-# ============================================================
-# ✅ Numerology (text-only)  <-- FIX HERE
-# ============================================================
-
 def generate_numerology_reading(
     *,
     name: str,
-    birth_date: str,   # YYYY-MM-DD
+    birth_date: str,
     topic: str,
     question: Optional[str] = None,
 ) -> str:
@@ -636,8 +719,6 @@ Kullanıcı:
 Bu verilerle çok kapsamlı ve derin bir numeroloji analizi yaz.
 """.strip()
 
-    # ✅ İlk çağrı için yüksek token (ama env clamp var)
-    # ✅ Devam çağrıları daha küçük token ile tamamlar
     initial_tokens = _max_output_tokens(4200)
     continue_tokens = _max_output_tokens(1800)
 
@@ -646,19 +727,15 @@ Bu verilerle çok kapsamlı ve derin bir numeroloji analizi yaz.
         initial_user=user,
         initial_tokens=initial_tokens,
         continue_tokens=continue_tokens,
-        max_hops=2,
+        max_hops=3,
     )
 
-
-# ============================================================
-# BirthChart (text-only)
-# ============================================================
 
 def generate_birthchart_reading(
     *,
     name: str,
-    birth_date: str,               # YYYY-MM-DD
-    birth_time: Optional[str],     # HH:MM (opsiyonel)
+    birth_date: str,
+    birth_time: Optional[str],
     birth_city: str,
     birth_country: str,
     topic: str,
@@ -703,44 +780,10 @@ Kurallar:
 - En az 1200 kelime hedefle; ideal 1400-2200.
 - Topic merkeze alınacak.
 - Sağlık/ölüm gibi korkutucu kehanet yok.
-
-İskelet:
-
-### 1) Kısa Özet (5-7 madde)
-- (Madde madde)
-
-### 2) Veri Notu ve Netlik Seviyesi
-- (2 paragraf)
-
-### 3) Çekirdek Kişilik Temaları (Güçlü + Gölge)
-- Güçlü yönler
-- Gölge yönler
-- Dengeleme önerileri (en az 5 madde)
-
-### 4) İlişki Dinamikleri
-- En az 7 net öneri
-
-### 5) Kariyer / Para Temaları
-- En az 7 net öneri
-
-### 6) Yakın Dönem Enerjileri
-- (3-6 ay) ve (12 ay)
-
-### 7) {topic} İçin Net Öneriler (en az 9 madde)
-
-### 8) “Bugünden Başlayarak” 5 Aksiyon Planı
-- 5 madde
-
-### 9) Not
-- kısa kapanış
 """.strip()
 
     return call_openai_text(system=system, user=user, max_output_tokens=_max_output_tokens(3800))
 
-
-# ============================================================
-# Personality Fusion (Numerology + BirthChart -> TEK metin)
-# ============================================================
 
 def generate_personality_fusion_reading(
     *,
@@ -806,8 +849,8 @@ Aşağıda iki ayrı metin var. Bunları harmanlayıp TEK bir birleşik analiz y
 def generate_personality_reading(
     *,
     name: str,
-    birth_date: str,               # YYYY-MM-DD
-    birth_time: Optional[str],     # HH:MM
+    birth_date: str,
+    birth_time: Optional[str],
     birth_city: str,
     birth_country: str,
     topic: str,
@@ -819,7 +862,6 @@ def generate_personality_reading(
         topic=topic,
         question=question,
     )
-
     birthchart_text = generate_birthchart_reading(
         name=name,
         birth_date=birth_date,
@@ -829,7 +871,6 @@ def generate_personality_reading(
         topic=topic,
         question=question,
     )
-
     return generate_personality_fusion_reading(
         name=name,
         birth_date=birth_date,
@@ -842,10 +883,6 @@ def generate_personality_reading(
         birthchart_text=birthchart_text,
     )
 
-
-# ============================================================
-# ✅ Synastry (Sinastri)
-# ============================================================
 
 def generate_synastry_reading(
     *,
