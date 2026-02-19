@@ -30,6 +30,11 @@ build/
 mobile/.dart_tool/
 mobile/build/
 mobile/*.iml
+# Imza (asla commit etme)
+**/android/key.properties
+**/android/*.keystore
+**/android/*.jks
+**/android/*.p12
 
 # Backend - local DB ve yüklenen dosyalar (production'da ayrı)
 app.db
