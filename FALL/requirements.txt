@@ -1,0 +1,11 @@
+fastapi==0.115.0
+uvicorn==0.38.0
+python-multipart==0.0.21
+pydantic==2.9.2
+pydantic-settings==2.5.2
+openai>=1.40.0
+Pillow==10.4.0
+sqlmodel==0.0.22
+gunicorn==23.0.0
+reportlab==4.2.5
+psycopg[binary]==3.2.3

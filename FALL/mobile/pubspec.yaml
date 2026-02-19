@@ -1,0 +1,74 @@
+name: lunaura
+description: "A new Flutter project."
+publish_to: 'none'
+
+# 🔴 Play Store update için +1 artıracağız (bir sonraki adımda)
+version: 1.0.0+21
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  http: ^1.2.2
+  image_picker: ^1.1.2
+
+  # PDF download / save / open
+  path_provider: ^2.1.4
+  open_filex: ^4.5.0
+
+  # PDF linkini tarayıcıda açmak için
+  url_launcher: ^6.3.0
+
+  flutter_localizations:
+    sdk: flutter
+
+  # Flutter SDK tarafından pinlenmiş
+  intl: ^0.20.2
+
+  # ✅ Telefon simülasyonu (debug only)
+  device_preview: ^1.2.0
+
+  uuid: ^4.5.1
+
+  # ✅ IAP
+  in_app_purchase: ^3.2.0
+  in_app_purchase_android: ^0.4.0
+  in_app_purchase_storekit: ^0.4.0
+
+  shared_preferences: ^2.5.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+  # ✅ APP ICON (ANA EKRAN İKONU)
+  flutter_launcher_icons: ^0.14.4
+
+  # ✅ SPLASH (istersen kullanacağız)
+  flutter_native_splash: ^2.4.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/backgrounds/ChatGPT Image 3 Oca 2026 18_20_30.png
+    - assets/legal/
+    - assets/tarot/cards/
+    - assets/icon/
+
+# 🔵 ANA EKRAN UYGULAMA İKONU AYARI
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: assets/icon/icon.png
+
+# 🟣 SPLASH EKRANI AYARI (şimdilik hazır, birazdan çalıştıracağız)
+flutter_native_splash:
+  color: "#000000"
+  image: assets/icon/icon.png
+  android: true
+  ios: true

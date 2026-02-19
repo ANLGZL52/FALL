@@ -1,0 +1,36 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build / outputs
+*.log
+dist/
+build/
+
+# Mobile (Flutter)
+FALL/mobile/.dart_tool/
+FALL/mobile/build/
+FALL/mobile/*.iml
+
+# Backend - local DB ve yüklenen dosyalar (production'da ayrı)
+FALL/app.db
+FALL/storage/
