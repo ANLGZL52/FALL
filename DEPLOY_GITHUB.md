@@ -4,6 +4,7 @@
 - Git deposu oluşturuldu (`git init`)
 - Tüm proje dosyaları eklendi (FALL backend + mobile, `app.db` ve `storage/` hariç)
 - İlk commit atıldı: `feat: Railway API varsayilan, yorum kalitesi ve tamamlama...`
+- Release commit: `release: AAB version 1.0.0+43 (build +22), key.properties opsiyonel`
 
 ## GitHub'a göndermek için
 
