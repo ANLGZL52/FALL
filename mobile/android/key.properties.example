@@ -1,0 +1,9 @@
+# Release AAB imzalamak için bu dosyayi key.properties olarak kopyalayin
+# ve asagidaki degerleri kendi bilgilerinizle doldurun.
+# key.properties asla Git'e eklenmemeli (zaten .gitignore'da).
+# .p12 veya .keystore dosyasi android/ klasorunde olmali.
+
+storePassword=KEYSTORE_SIFRESI
+keyPassword=KEY_SIFRESI
+keyAlias=lunaura
+storeFile=../lunaura-release.p12
