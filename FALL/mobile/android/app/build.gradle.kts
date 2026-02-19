@@ -7,12 +7,13 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-// ✅ android/key.properties dosyasını oku
+// ✅ android/key.properties varsa release keystore ile imzala; yoksa debug (AAB yine oluşur)
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
-if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
-}
+val hasReleaseKey = keystorePropertiesFile.exists().also {
+    if (it) keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+} && keystoreProperties["storeFile"] != null && keystoreProperties["storePassword"] != null &&
+    keystoreProperties["keyAlias"] != null && keystoreProperties["keyPassword"] != null
 
 android {
     namespace = "com.anlgzl.lunaura"
@@ -37,20 +38,22 @@ android {
         versionName = flutter.versionName
     }
 
-    // ✅ RELEASE signing config
     signingConfigs {
-        create("release") {
-            storeFile = file(keystoreProperties["storeFile"] as String)
-            storePassword = keystoreProperties["storePassword"] as String
-            keyAlias = keystoreProperties["keyAlias"] as String
-            keyPassword = keystoreProperties["keyPassword"] as String
+        if (hasReleaseKey) {
+            create("release") {
+                storeFile = file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+            }
         }
     }
 
     buildTypes {
         release {
-            // ✅ artık debug değil RELEASE key ile imzalanacak
-            signingConfig = signingConfigs.getByName("release")
+            if (hasReleaseKey) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = false
             isShrinkResources = false
         }
