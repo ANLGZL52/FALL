@@ -61,6 +61,14 @@ def _require_owner(obj: Any, device_id: str) -> Dict[str, Any]:
     return d
 
 
+def _mask_result_if_unpaid(obj: Any) -> Dict[str, Any]:
+    """Ödeme yapılmamışsa result_text istemciye gönderilmez."""
+    d = _as_dict(obj)
+    if not d.get("is_paid"):
+        d["result_text"] = None
+    return d
+
+
 @router.post("/start", response_model=NumerologyReadingOut)
 def start(
     payload: NumerologyStartIn,
@@ -102,7 +110,7 @@ def get_reading(
     if not obj:
         raise HTTPException(status_code=404, detail="Numerology kaydı bulunamadı.")
     _require_owner(obj, device_id)
-    return obj
+    return _mask_result_if_unpaid(obj)
 
 
 @router.post("/{reading_id}/mark-paid", response_model=NumerologyReadingOut)
@@ -134,7 +142,7 @@ def mark_paid(
     obj = _repo.mark_paid(session=session, reading_id=reading_id, payment_ref=payload.payment_ref)
     if not obj:
         raise HTTPException(status_code=404, detail="Numerology kaydı bulunamadı (mark-paid).")
-    return obj
+    return _mask_result_if_unpaid(obj)
 
 
 @router.post("/{reading_id}/generate", response_model=NumerologyReadingOut)
@@ -149,18 +157,15 @@ def generate(
 
     d = _require_owner(obj, device_id)
 
-    is_paid = bool(d.get("is_paid", False))
-    if not is_paid:
-        raise HTTPException(status_code=402, detail="Payment Required")
-
+    # Ödeme öncesi generate’e izin ver (yorum DB’de saklanır, _mask_result_if_unpaid ödenmemişse göstermez)
     status = (d.get("status") or "").lower().strip()
     result_text = (d.get("result_text") or "").strip()
 
     if result_text:
-        return obj
+        return _mask_result_if_unpaid(obj)
 
     if status == "processing":
-        return obj
+        return _mask_result_if_unpaid(obj)
 
     if status not in ("paid", "processing", "completed"):
         _repo.set_status(session=session, reading_id=reading_id, status="paid")
@@ -192,7 +197,7 @@ def generate(
         except Exception:
             pass
 
-        return updated
+        return _mask_result_if_unpaid(updated)
 
     except HTTPException:
         _repo.set_status(session=session, reading_id=reading_id, status="paid")

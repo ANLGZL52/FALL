@@ -5,8 +5,10 @@ import '../../services/device_id_service.dart';
 import '../../services/iap_service.dart';
 import '../../services/product_catalog.dart';
 
+import '../../services/synastry_api.dart';
 import '../../widgets/mystic_scaffold.dart';
 import 'synastry_generating_screen.dart';
+import 'synastry_result_screen.dart';
 
 class SynastryPaymentScreen extends StatefulWidget {
   final String readingId;
@@ -25,8 +27,7 @@ class SynastryPaymentScreen extends StatefulWidget {
 class _SynastryPaymentScreenState extends State<SynastryPaymentScreen> {
   bool _loading = false;
   String? _lastPaymentId;
-
-  // sadece debug için: hangi device ile gidiyoruz gör
+  String _phase = 'idle';
   String? _deviceId;
 
   final String _sku = ProductCatalog.synastry149;
@@ -41,14 +42,39 @@ class _SynastryPaymentScreenState extends State<SynastryPaymentScreen> {
     );
   }
 
+  Future<void> _goToResult() async {
+    if (!mounted) return;
+    final api = SynastryApi();
+    final deviceId = await DeviceIdService.getOrCreate();
+    final status = await api.getStatus(widget.readingId, deviceId: deviceId);
+    final resultText = (status.resultText ?? '').trim();
+    if (resultText.isNotEmpty && mounted) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => SynastryResultScreen(readingId: widget.readingId, resultText: resultText),
+        ),
+      );
+    } else {
+      await _goGenerating();
+    }
+  }
+
   Future<void> _payAndStart() async {
     if (_loading) return;
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _phase = 'preparing';
+    });
 
     try {
       // ✅ KRİTİK: device id’yi al ve sakla
       final deviceId = await DeviceIdService.getOrCreate();
       if (mounted) setState(() => _deviceId = deviceId);
+
+      final api = SynastryApi();
+      await api.generate(widget.readingId, deviceId: deviceId);
+      if (!mounted) return;
+      setState(() => _phase = 'paying');
 
       final shouldUseIap = kReleaseMode || debugUseStoreIap;
 
@@ -69,14 +95,17 @@ class _SynastryPaymentScreenState extends State<SynastryPaymentScreen> {
       }
 
       // ✅ sadece generating ekranına geç (generate/poll tek yerde)
-      await _goGenerating();
+      await _goToResult();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Ödeme hatası: $e')),
       );
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() {
+        _loading = false;
+        _phase = 'idle';
+      });
     }
   }
 
@@ -151,6 +180,15 @@ class _SynastryPaymentScreenState extends State<SynastryPaymentScreen> {
                   ],
                 ),
               ),
+              if (_phase == 'preparing')
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    'Yorumunuz hazırlanıyor, lütfen bekleyin...',
+                    style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 13),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
               const Spacer(),
               SizedBox(
                 height: 56,
@@ -162,7 +200,10 @@ class _SynastryPaymentScreenState extends State<SynastryPaymentScreen> {
                   ),
                   onPressed: _loading ? null : _payAndStart,
                   child: _loading
-                      ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                      ? Text(
+                          _phase == 'preparing' ? 'Yorumunuz hazırlanıyor...' : 'Ödeme işleniyor...',
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                        )
                       : const Text(
                           "Öde → Analizi Başlat",
                           style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),

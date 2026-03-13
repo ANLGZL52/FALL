@@ -809,4 +809,30 @@ class TarotDeck {
     copy.shuffle();
     return copy;
   }
+
+  /// Kartı id ile bulur (örn. "major_00_fool"). Yoksa null.
+  static TarotCard? cardById(String baseId) {
+    try {
+      return all.firstWhere((c) => c.id == baseId);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// API'den gelen "major_00_fool|U" / "major_18_moon|R" formatını TarotCard listesine çevirir.
+  static List<TarotCard> cardsFromApiList(List<dynamic> selectedCards) {
+    final result = <TarotCard>[];
+    for (final raw in selectedCards) {
+      final s = (raw ?? '').toString().trim();
+      if (s.isEmpty) continue;
+      final parts = s.split('|');
+      final baseId = parts[0].trim();
+      final reversed = parts.length > 1 && parts[1].toUpperCase() == 'R';
+      final card = cardById(baseId);
+      if (card != null) {
+        result.add(card.copyWith(isReversed: reversed));
+      }
+    }
+    return result;
+  }
 }

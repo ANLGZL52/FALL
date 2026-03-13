@@ -60,8 +60,9 @@ def _get_or_404_owner(session: Session, reading_id: str, device_id: str) -> Hand
 
 
 def _to_schema(r: HandReadingDB) -> HandReading:
+    """Ödeme yapılmamışsa yorum (result_text/comment) istemciye gönderilmez."""
     photos = list_photos(r)
-    result = (r.result_text or None)
+    result = (r.result_text if r.is_paid else None)
 
     return HandReading(
         id=r.id,
@@ -200,9 +201,7 @@ async def generate(
     if not photos:
         raise HTTPException(status_code=400, detail="No photos uploaded")
 
-    if not r.is_paid:
-        raise HTTPException(status_code=402, detail="Payment Required")
-
+    # Ödeme öncesi generate’e izin ver (yorum DB’de saklanır, _to_schema ödenmemişse göstermez)
     status = (r.status or "").lower().strip()
     result_text = (r.result_text or "").strip()
 

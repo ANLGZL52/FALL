@@ -70,6 +70,8 @@ def _spawn_thread(reading_id: str) -> None:
 
 
 def _to_schema(r: TarotReadingDB) -> TarotReading:
+    """Ödeme yapılmamışsa yorum (result_text) istemciye gönderilmez."""
+    result_text = r.result_text if r.is_paid else None
     return TarotReading(
         id=r.id,
         topic=r.topic,
@@ -79,7 +81,7 @@ def _to_schema(r: TarotReadingDB) -> TarotReading:
         spread_type=r.spread_type,
         selected_cards=r.get_cards(),
         status=r.status,
-        result_text=r.result_text,
+        result_text=result_text,
         rating=getattr(r, "rating", None),
         is_paid=r.is_paid,
         payment_ref=getattr(r, "payment_ref", None),
@@ -165,8 +167,7 @@ async def generate(reading_id: str, session: Session = Depends(get_session)):
 
     if not r.get_cards():
         raise HTTPException(status_code=400, detail="Önce kart seçmelisin.")
-    if not r.is_paid:
-        raise HTTPException(status_code=402, detail="Payment Required")
+    # Ödeme öncesi generate’e izin ver (yorum DB’de saklanır, _to_schema ödenmemişse göstermez)
 
     if r.status == "completed" and (r.result_text or "").strip():
         return _to_schema(r)

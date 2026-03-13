@@ -7,6 +7,7 @@ import '../../services/product_catalog.dart';
 import '../../services/coffee_api.dart';
 
 import 'coffee_loading_screen.dart';
+import 'coffee_result_screen.dart';
 
 import '../../widgets/glass_card.dart';
 import '../../widgets/gradient_button.dart';
@@ -23,16 +24,25 @@ class CoffeePaymentScreen extends StatefulWidget {
 class _CoffeePaymentScreenState extends State<CoffeePaymentScreen> {
   bool _loading = false;
   String? _lastPaymentId;
+  String _phase = 'idle';
 
-  // ✅ Tarot gibi: gerçek telefonda DEBUG build ile store akışını test etmek için TRUE
-  // Release zaten store akışına girer.
   static const bool debugUseStoreIap = true;
 
-  Future<void> _goLoading() async {
+  Future<void> _goToResult() async {
     if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => CoffeeLoadingScreen(readingId: widget.readingId)),
-    );
+    final deviceId = await DeviceIdService.getOrCreate();
+    final d = await CoffeeApi.detailRaw(readingId: widget.readingId, deviceId: deviceId);
+    final text = ((d['comment'] ?? d['result_text']) ?? '').toString().trim();
+    if (text.isNotEmpty && mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => CoffeeResultScreen(resultText: text)),
+        (route) => false,
+      );
+    } else {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => CoffeeLoadingScreen(readingId: widget.readingId)),
+      );
+    }
   }
 
   bool _hasAnyPhotoFromDetail(Map<String, dynamic> d) {
@@ -54,7 +64,10 @@ class _CoffeePaymentScreenState extends State<CoffeePaymentScreen> {
   }
 
   Future<void> _pay() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _phase = 'preparing';
+    });
     try {
       final deviceId = await DeviceIdService.getOrCreate();
 
@@ -67,7 +80,10 @@ class _CoffeePaymentScreenState extends State<CoffeePaymentScreen> {
         throw Exception("Ödemeden önce fincan fotoğrafını yüklemelisin.");
       }
 
-      // 1) Store purchase + backend verify (IapService içinde)
+      await CoffeeApi.generate(readingId: widget.readingId, deviceId: deviceId);
+      if (!mounted) return;
+      setState(() => _phase = 'paying');
+
       final shouldUseIap = kReleaseMode || debugUseStoreIap;
       if (shouldUseIap) {
         final verify = await IapService.instance.buyAndVerify(
@@ -82,15 +98,17 @@ class _CoffeePaymentScreenState extends State<CoffeePaymentScreen> {
         if (mounted) setState(() => _lastPaymentId = verify.paymentId);
       }
 
-      // 2) Processing/Loading ekranına geç (poll + controlled generate)
-      await _goLoading();
+      await _goToResult();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Ödeme/Yorum hatası: $e')),
       );
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() {
+        _loading = false;
+        _phase = 'idle';
+      });
     }
   }
 
@@ -142,8 +160,21 @@ class _CoffeePaymentScreenState extends State<CoffeePaymentScreen> {
               ),
             ),
             const SizedBox(height: 18),
+            if (_phase == 'preparing')
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Yorumunuz hazırlanıyor, lütfen bekleyin...',
+                  style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 13),
+                  textAlign: TextAlign.center,
+                ),
+              ),
             GradientButton(
-              text: _loading ? 'İşleniyor...' : 'Ödemeyi Tamamla ✨',
+              text: _loading
+                  ? (_phase == 'preparing'
+                      ? 'Yorumunuz hazırlanıyor...'
+                      : 'Ödeme işleniyor...')
+                  : 'Ödemeyi Tamamla ✨',
               onPressed: _loading ? null : _pay,
             ),
           ],

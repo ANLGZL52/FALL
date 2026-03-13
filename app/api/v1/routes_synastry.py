@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from uuid import uuid4
+from typing import Any, Dict
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import Response
 from sqlmodel import Session
@@ -15,6 +16,16 @@ from app.services.pdf_service import build_synastry_pdf_bytes
 
 
 router = APIRouter(prefix="/synastry", tags=["synastry"])
+
+
+def _mask_result_if_unpaid(reading: Dict[str, Any]) -> Dict[str, Any]:
+    """Ödeme yapılmamışsa result_text istemciye gönderilmez."""
+    if not reading:
+        return reading
+    out = dict(reading)
+    if not out.get("is_paid"):
+        out["result_text"] = None
+    return out
 
 
 @router.post("/start")
@@ -50,7 +61,7 @@ def get_status(reading_id: str, session: Session = Depends(get_session)):
     reading = synastry_repo.get(session=session, reading_id=reading_id)
     if not reading:
         raise HTTPException(status_code=404, detail="Reading not found")
-    return reading
+    return _mask_result_if_unpaid(reading)
 
 
 @router.post("/{reading_id}/mark-paid")
@@ -73,7 +84,7 @@ def mark_paid(
     reading = synastry_repo.mark_paid(session=session, reading_id=reading_id, payment_ref=payment_ref)
     if not reading:
         raise HTTPException(status_code=404, detail="Reading not found")
-    return reading
+    return _mask_result_if_unpaid(reading)
 
 
 @router.post("/{reading_id}/generate")
@@ -82,14 +93,12 @@ def generate(reading_id: str, session: Session = Depends(get_session)):
     if not reading:
         raise HTTPException(status_code=404, detail="Reading not found")
 
-    if not reading.get("is_paid"):
-        raise HTTPException(status_code=402, detail="Payment Required")
-
+    # Ödeme öncesi generate'e izin ver (yorum DB'de saklanır, _mask_result_if_unpaid ödenmemişse göstermez)
     if (reading.get("result_text") or "").strip():
-        return reading
+        return _mask_result_if_unpaid(reading)
 
     if (reading.get("status") or "").lower().strip() == "processing" and not claimed:
-        return reading
+        return _mask_result_if_unpaid(reading)
 
     try:
         result_text = generate_synastry_reading(
@@ -107,7 +116,7 @@ def generate(reading_id: str, session: Session = Depends(get_session)):
             question=reading.get("question"),
         )
         updated = synastry_repo.set_result(session=session, reading_id=reading_id, result_text=result_text)
-        return updated
+        return _mask_result_if_unpaid(updated)
     except Exception as e:
         synastry_repo.set_status(session=session, reading_id=reading_id, status="paid")
         raise HTTPException(status_code=500, detail=f"Synastry üretilemedi: {e}")

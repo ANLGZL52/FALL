@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../services/birthchart_api.dart';
 import '../../services/device_id_service.dart';
 import '../../services/iap_service.dart';
 import '../../services/product_catalog.dart';
@@ -10,6 +11,7 @@ import '../../widgets/gradient_button.dart';
 import '../../widgets/mystic_scaffold.dart';
 
 import 'birthchart_loading_screen.dart';
+import 'birthchart_result_screen.dart';
 
 class BirthChartPaymentScreen extends StatefulWidget {
   final String readingId;
@@ -26,10 +28,20 @@ class BirthChartPaymentScreen extends StatefulWidget {
 class _BirthChartPaymentScreenState extends State<BirthChartPaymentScreen> {
   bool _loading = false;
   String? _lastPaymentId;
+  String _phase = 'idle';
 
-  // ✅ Debug modda da store akışını test etmek istersen true
-  // Release zaten store akışına girer.
   static const bool debugUseStoreIap = true;
+
+  Future<void> _goToResult() async {
+    if (!mounted) return;
+    final deviceId = await DeviceIdService.getOrCreate();
+    final reading = await BirthChartApi.detail(readingId: widget.readingId, deviceId: deviceId);
+    if (mounted) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => BirthChartResultScreen(reading: reading)),
+      );
+    }
+  }
 
   Future<void> _goLoading() async {
     if (!mounted) return;
@@ -39,10 +51,17 @@ class _BirthChartPaymentScreenState extends State<BirthChartPaymentScreen> {
   }
 
   Future<void> _pay() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _phase = 'preparing';
+    });
     try {
       // deviceId sadece IapService içinde de alınsa, burada çağırmak “header hazır” ve debug için iyi.
-      await DeviceIdService.getOrCreate();
+      final deviceId = await DeviceIdService.getOrCreate();
+
+      await BirthChartApi.generate(readingId: widget.readingId, deviceId: deviceId);
+      if (!mounted) return;
+      setState(() => _phase = 'paying');
 
       final shouldUseIap = kReleaseMode || debugUseStoreIap;
       if (shouldUseIap) {
@@ -58,14 +77,17 @@ class _BirthChartPaymentScreenState extends State<BirthChartPaymentScreen> {
         if (mounted) setState(() => _lastPaymentId = verify.paymentId);
       }
 
-      await _goLoading();
+      await _goToResult();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Ödeme/Yorum hatası: $e')),
       );
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() {
+        _loading = false;
+        _phase = 'idle';
+      });
     }
   }
 
@@ -112,9 +134,20 @@ class _BirthChartPaymentScreenState extends State<BirthChartPaymentScreen> {
                 ],
               ),
             ),
+            if (_phase == 'preparing')
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Yorumunuz hazırlanıyor, lütfen bekleyin...',
+                  style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 13),
+                  textAlign: TextAlign.center,
+                ),
+              ),
             const SizedBox(height: 18),
             GradientButton(
-              text: _loading ? 'İşleniyor...' : 'Ödemeyi Tamamla ✨',
+              text: _loading
+                  ? (_phase == 'preparing' ? 'Yorumunuz hazırlanıyor...' : 'Ödeme işleniyor...')
+                  : 'Ödemeyi Tamamla ✨',
               onPressed: _loading ? null : _pay,
             ),
           ],

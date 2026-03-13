@@ -58,8 +58,9 @@ def _get_or_404_owner(
 
 
 def _to_schema(r: CoffeeReadingDB) -> CoffeeReading:
+    """Ödeme yapılmamışsa yorum (result_text/comment) istemciye gönderilmez."""
     photos = list_photos(r)
-    result = r.result_text
+    result = r.result_text if r.is_paid else None
 
     return CoffeeReading(
         id=r.id,
@@ -185,9 +186,7 @@ async def generate(
     if not photos:
         raise HTTPException(status_code=400, detail="Fotoğraf yüklenmedi")
 
-    if not r.is_paid:
-        raise HTTPException(status_code=402, detail="Payment Required")
-
+    # Ödeme öncesi generate’e izin ver (yorum DB’de saklanır, _to_schema ödenmemişse göstermez)
     # zaten üretildiyse dön
     if r.result_text:
         return _to_schema(r)

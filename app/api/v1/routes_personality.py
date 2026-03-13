@@ -33,6 +33,16 @@ def _device_guard(reading: dict, device_id: Optional[str]) -> None:
         raise HTTPException(status_code=403, detail="Forbidden (device mismatch)")
 
 
+def _mask_result_if_unpaid(reading: dict) -> dict:
+    """Ödeme yapılmamışsa result_text istemciye gönderilmez."""
+    if not reading:
+        return reading
+    out = dict(reading)
+    if not out.get("is_paid"):
+        out["result_text"] = None
+    return out
+
+
 @router.get("/{reading_id}")
 def get_personality(
     reading_id: str,
@@ -44,7 +54,7 @@ def get_personality(
         raise HTTPException(status_code=404, detail="Reading not found")
 
     _device_guard(reading, x_device_id)
-    return reading
+    return _mask_result_if_unpaid(reading)
 
 
 @router.post("/start")
@@ -105,7 +115,7 @@ def mark_paid(
     )
     if not updated:
         raise HTTPException(status_code=404, detail="Reading not found")
-    return updated
+    return _mask_result_if_unpaid(updated)
 
 
 def _bg_generate_personality(reading_id: str) -> None:
@@ -121,7 +131,8 @@ def _bg_generate_personality(reading_id: str) -> None:
             return
 
         # ödeme kontrol
-        if not reading.get("is_paid"):
+        # Ödeme öncesi generate: is_paid kontrolü kaldırıldı (yorum saklanır, API göstermez)
+        if False and not reading.get("is_paid"):
             # paid değilse processing’te bırakmayalım
             personality_repo.set_status(session=session, reading_id=reading_id, status="paid")
             return
@@ -160,10 +171,7 @@ def generate_personality(
 
     _device_guard(reading, x_device_id)
 
-    # 🔒 ödeme zorunlu
-    if not reading.get("is_paid"):
-        raise HTTPException(status_code=402, detail="Payment Required")
-
+    # Ödeme öncesi generate’e izin ver (yorum DB’de saklanır, _mask_result_if_unpaid ödenmemişse göstermez)
     status = (reading.get("status") or "").lower().strip()
     result_text = (reading.get("result_text") or "").strip()
 
@@ -171,19 +179,19 @@ def generate_personality(
     if result_text:
         if status != "done":
             fixed = personality_repo.set_status(session=session, reading_id=reading_id, status="done")
-            return fixed or reading
-        return reading
+            return _mask_result_if_unpaid(fixed or reading)
+        return _mask_result_if_unpaid(reading)
 
     # ✅ zaten processing ise tekrar enqueue etme
     if status == "processing":
-        return reading
+        return _mask_result_if_unpaid(personality_repo.get(session=session, reading_id=reading_id) or reading)
 
     # ✅ processing'e çek ve background job başlat
     personality_repo.set_status(session=session, reading_id=reading_id, status="processing")
     background.add_task(_bg_generate_personality, reading_id)
 
     # ✅ HEMEN dön (timeout bitti)
-    return personality_repo.get(session=session, reading_id=reading_id) or reading
+    return _mask_result_if_unpaid(personality_repo.get(session=session, reading_id=reading_id) or reading)
 
 
 @router.post("/{reading_id}/rate")

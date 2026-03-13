@@ -10,7 +10,9 @@ import '../../widgets/glass_card.dart';
 import '../../widgets/gradient_button.dart';
 import '../../widgets/mystic_scaffold.dart';
 
+import 'tarot_deck.dart';
 import 'tarot_models.dart';
+import 'tarot_result_screen.dart';
 import 'tarot_processing_screen.dart';
 
 class TarotPaymentScreen extends StatefulWidget {
@@ -34,9 +36,8 @@ class TarotPaymentScreen extends StatefulWidget {
 class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
   bool _loading = false;
   String? _lastPaymentId;
+  String _phase = 'idle';
 
-  // ✅ Gerçek telefonda DEBUG build ile store akışını test etmek için TRUE
-  // Release zaten store akışına geçiyor.
   static const bool debugUseStoreIap = true;
 
   double get _amount {
@@ -91,6 +92,32 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
     }).toList();
   }
 
+  Future<void> _goToResult() async {
+    if (!mounted) return;
+    final deviceId = await DeviceIdService.getOrCreate();
+    final d = await TarotApi.detail(readingId: widget.readingId, deviceId: deviceId);
+    final resultText = (d['result_text'] ?? '').toString().trim();
+    if (resultText.isNotEmpty && mounted) {
+      final rawCards = d['selected_cards'];
+      List<TarotCard> cards = widget.selectedCards;
+      if (rawCards is List) {
+        cards = TarotDeck.cardsFromApiList(rawCards);
+      }
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => TarotResultScreen(
+            question: widget.question,
+            spreadType: widget.spreadType,
+            selectedCards: cards,
+            resultText: resultText,
+          ),
+        ),
+      );
+    } else {
+      await _goProcessing();
+    }
+  }
+
   Future<void> _goProcessing() async {
     if (!mounted) return;
 
@@ -118,7 +145,10 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
       deviceId: deviceId,
     );
 
-    // 1) Store purchase + backend verify (IapService içinde)
+    await TarotApi.generate(readingId: widget.readingId, deviceId: deviceId);
+    if (!mounted) return;
+    setState(() => _phase = 'paying');
+
     final verify = await IapService.instance.buyAndVerify(
       readingId: widget.readingId,
       sku: _sku,
@@ -129,24 +159,14 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
     }
 
     _lastPaymentId = verify.paymentId;
-
-    // (Debug amaçlı bilgi)
-    if (!kReleaseMode) {
-      try {
-        final d = await TarotApi.detail(readingId: widget.readingId, deviceId: deviceId);
-        final st = (d['status'] ?? '').toString();
-        final paid = (d['is_paid'] ?? false).toString();
-        // ignore: avoid_print
-        print('[TAROT_PAYMENT] after verify detail status=$st is_paid=$paid paymentId=${verify.paymentId}');
-      } catch (_) {}
-    }
-
-    // 2) Processing ekranına geç (poll + controlled generate)
-    await _goProcessing();
+    await _goToResult();
   }
 
   Future<void> _payAndContinue() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _phase = 'preparing';
+    });
     try {
       if (kReleaseMode) {
         await _payStoreIap();
@@ -164,7 +184,10 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
         SnackBar(content: Text('Ödeme/Yorum hatası: $e')),
       );
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() {
+        _loading = false;
+        _phase = 'idle';
+      });
     }
   }
 
@@ -251,9 +274,20 @@ class _TarotPaymentScreenState extends State<TarotPaymentScreen> {
                 ],
               ),
             ),
+            if (_phase == 'preparing')
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Yorumunuz hazırlanıyor, lütfen bekleyin...',
+                  style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 13),
+                  textAlign: TextAlign.center,
+                ),
+              ),
             const SizedBox(height: 12),
             GradientButton(
-              text: _loading ? 'İşleniyor...' : 'Ödemeyi Başlat ve Yorumu Gör',
+              text: _loading
+                  ? (_phase == 'preparing' ? 'Yorumunuz hazırlanıyor...' : 'Ödeme işleniyor...')
+                  : 'Ödemeyi Başlat ve Yorumu Gör',
               onPressed: _loading ? null : _payAndContinue,
             ),
             const SizedBox(height: 10),

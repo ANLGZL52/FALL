@@ -7,7 +7,9 @@ import '../../services/iap_service.dart';
 import '../../services/product_catalog.dart';
 import '../../services/profile_store.dart'; // ✅ opsiyonel kişiselleştirme
 
+import '../../services/hand_api.dart';
 import 'hand_loading_screen.dart';
+import 'hand_result_screen.dart';
 
 import '../../widgets/glass_card.dart';
 import '../../widgets/gradient_button.dart';
@@ -24,8 +26,8 @@ class HandPaymentScreen extends StatefulWidget {
 class _HandPaymentScreenState extends State<HandPaymentScreen> {
   bool _loading = false;
   String? _lastPaymentId;
+  String _phase = 'idle';
 
-  // ✅ Debug modda store akışını test etmek istersen true
   static const bool debugUseStoreIap = false;
 
   String _titleSuffix = ''; // opsiyonel: profil adı
@@ -50,13 +52,18 @@ class _HandPaymentScreenState extends State<HandPaymentScreen> {
   }
 
   Future<void> _pay() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _phase = 'preparing';
+    });
     try {
-      // ✅ cihaz id hazır olsun
-      await DeviceIdService.getOrCreate();
+      final deviceId = await DeviceIdService.getOrCreate();
+
+      await HandApi.generate(deviceId: deviceId, readingId: widget.readingId);
+      if (!mounted) return;
+      setState(() => _phase = 'paying');
 
       final shouldUseIap = kReleaseMode || debugUseStoreIap;
-
       if (shouldUseIap) {
         final verify = await IapService.instance.buyAndVerify(
           readingId: widget.readingId,
@@ -71,12 +78,8 @@ class _HandPaymentScreenState extends State<HandPaymentScreen> {
       }
 
       if (!mounted) return;
-
-      // ✅ ödeme sonrası generate burada yok -> Loading ekranı yapacak
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => HandLoadingScreen(readingId: widget.readingId),
-        ),
+        MaterialPageRoute(builder: (_) => HandResultScreen(readingId: widget.readingId)),
       );
     } catch (e) {
       if (!mounted) return;
@@ -84,7 +87,10 @@ class _HandPaymentScreenState extends State<HandPaymentScreen> {
         SnackBar(content: Text('Ödeme/Yorum hatası: $e')),
       );
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() {
+        _loading = false;
+        _phase = 'idle';
+      });
     }
   }
 
@@ -141,9 +147,19 @@ class _HandPaymentScreenState extends State<HandPaymentScreen> {
                 ],
               ),
             ),
-            const SizedBox(height: 18),
+            if (_phase == 'preparing')
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Yorumunuz hazırlanıyor, lütfen bekleyin...',
+                  style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 13),
+                  textAlign: TextAlign.center,
+                ),
+              ),
             GradientButton(
-              text: _loading ? 'İşleniyor...' : 'Ödemeyi Tamamla ✨',
+              text: _loading
+                  ? (_phase == 'preparing' ? 'Yorumunuz hazırlanıyor...' : 'Ödeme işleniyor...')
+                  : 'Ödemeyi Tamamla ✨',
               onPressed: _loading ? null : _pay,
             ),
           ],

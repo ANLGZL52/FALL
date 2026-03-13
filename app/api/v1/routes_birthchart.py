@@ -63,6 +63,16 @@ def mark_paid(
     return reading
 
 
+def _mask_result_if_unpaid(reading: Dict[str, Any]) -> Dict[str, Any]:
+    """Ödeme yapılmamışsa result_text istemciye gönderilmez."""
+    if not reading:
+        return reading
+    out = dict(reading)
+    if not out.get("is_paid"):
+        out["result_text"] = None
+    return out
+
+
 @router.get("/{reading_id}")
 def detail(
     reading_id: str,
@@ -71,7 +81,7 @@ def detail(
     reading = birthchart_repo.get(session=session, reading_id=reading_id)
     if not reading:
         raise HTTPException(status_code=404, detail="Reading not found")
-    return reading
+    return _mask_result_if_unpaid(reading)
 
 
 @router.post("/{reading_id}/generate")
@@ -83,25 +93,22 @@ def generate(
     if not reading:
         raise HTTPException(status_code=404, detail="Reading not found")
 
-    # 🔒 ödeme zorunlu
-    if not reading.get("is_paid"):
-        raise HTTPException(status_code=402, detail="Payment Required")
-
+    # Ödeme öncesi generate’e izin ver (yorum DB’de saklanır, _mask_result_if_unpaid ödenmemişse göstermez)
     status = (reading.get("status") or "").lower().strip()
     result_text = (reading.get("result_text") or "").strip()
 
     # ✅ idempotent: sonuç varsa direkt dön
     if result_text and status == "done":
-        return reading
+        return _mask_result_if_unpaid(reading)
 
     # ✅ result var ama status farklıysa düzelt
     if result_text and status != "done":
         fixed = birthchart_repo.set_status(session=session, reading_id=reading_id, status="done")
-        return fixed or reading
+        return _mask_result_if_unpaid(fixed or reading)
 
     # ✅ processing ise tekrar üretme
     if status == "processing":
-        return reading
+        return _mask_result_if_unpaid(reading)
 
     # ✅ production generate
     birthchart_repo.set_status(session=session, reading_id=reading_id, status="processing")
@@ -117,7 +124,7 @@ def generate(
             question=reading.get("question"),
         )
         updated = birthchart_repo.set_result(session=session, reading_id=reading_id, result_text=result_text)
-        return updated
+        return _mask_result_if_unpaid(updated)
 
     except Exception as e:
         birthchart_repo.set_status(session=session, reading_id=reading_id, status="paid")

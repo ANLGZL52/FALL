@@ -6,7 +6,9 @@ import '../../services/iap_service.dart';
 import '../../services/product_catalog.dart';
 import '../../widgets/mystic_scaffold.dart';
 
+import '../../services/personality_api.dart';
 import 'personality_generating_screen.dart';
+import 'personality_result_screen.dart';
 
 class PersonalityPaymentScreen extends StatefulWidget {
   final String readingId;
@@ -35,10 +37,9 @@ class PersonalityPaymentScreen extends StatefulWidget {
 class _PersonalityPaymentScreenState extends State<PersonalityPaymentScreen> {
   bool _loading = false;
   String? _lastPaymentId;
+  String _phase = 'idle';
 
   final String _sku = ProductCatalog.personality399;
-
-  // Debug'da store test etmek istersen true
   static const bool debugUseStoreIap = false;
 
   Future<void> _goGenerating() async {
@@ -49,9 +50,16 @@ class _PersonalityPaymentScreenState extends State<PersonalityPaymentScreen> {
   }
 
   Future<void> _payAndContinue() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _phase = 'preparing';
+    });
     try {
-      await DeviceIdService.getOrCreate(); // sadece deviceId üretimi garanti
+      final deviceId = await DeviceIdService.getOrCreate();
+
+      await PersonalityApi.generate(readingId: widget.readingId, deviceId: deviceId);
+      if (!mounted) return;
+      setState(() => _phase = 'paying');
 
       final shouldUseIap = kReleaseMode || debugUseStoreIap;
 
@@ -68,15 +76,20 @@ class _PersonalityPaymentScreenState extends State<PersonalityPaymentScreen> {
         if (mounted) setState(() => _lastPaymentId = verify.paymentId);
       }
 
-      // ✅ Ödeme sonrası direkt generating ekranına geç
-      await _goGenerating();
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => PersonalityResultScreen(readingId: widget.readingId)),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Ödeme/Yorum hatası: $e')),
       );
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() {
+        _loading = false;
+        _phase = 'idle';
+      });
     }
   }
 
@@ -143,6 +156,15 @@ class _PersonalityPaymentScreenState extends State<PersonalityPaymentScreen> {
                   ],
                 ),
               ),
+              if (_phase == 'preparing')
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    'Yorumunuz hazırlanıyor, lütfen bekleyin...',
+                    style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 13),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
               const Spacer(),
               SizedBox(
                 height: 56,
@@ -154,7 +176,10 @@ class _PersonalityPaymentScreenState extends State<PersonalityPaymentScreen> {
                   ),
                   onPressed: _loading ? null : _payAndContinue,
                   child: _loading
-                      ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                      ? Text(
+                          _phase == 'preparing' ? 'Yorumunuz hazırlanıyor...' : 'Ödeme işleniyor...',
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                        )
                       : const Text("Öde → Analizi Hazırla", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
                 ),
               ),

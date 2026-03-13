@@ -5,7 +5,10 @@ import '../../services/device_id_service.dart';
 import '../../services/profile_api.dart';
 import '../../services/profile_store.dart';
 import '../../widgets/mystic_scaffold.dart';
+import '../hand/hand_result_screen.dart';
+import '../personality/personality_result_screen.dart';
 import 'profile_legal_screen.dart';
+import 'reading_detail_loader_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -111,6 +114,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void _onStoreChanged() {
     if (!mounted) return;
     _applyFromStore(force: false);
+  }
+
+  void _openReading(ProfileReadingItem r) {
+    if (r.id.trim().isEmpty) return;
+    if (r.type == 'hand') {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => HandResultScreen(readingId: r.id)),
+      );
+      return;
+    }
+    if (r.type == 'personality') {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => PersonalityResultScreen(readingId: r.id)),
+      );
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ReadingDetailLoaderScreen(readingId: r.id, type: r.type),
+      ),
+    );
   }
 
   void _applyFromStore({required bool force}) {
@@ -451,22 +475,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                                 : null;
                                             return Padding(
                                               padding: const EdgeInsets.only(bottom: 10),
-                                              child: Row(
-                                                crossAxisAlignment: CrossAxisAlignment.center,
-                                                children: [
-                                                  Icon(_iconForType(r.type), color: const Color(0xFFF5C361), size: 20),
-                                                  const SizedBox(width: 10),
-                                                  Expanded(
-                                                    child: Column(
-                                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                                      children: [
-                                                        Text(r.title.isNotEmpty ? r.title : r.typeLabel, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
-                                                        if (dateStr != null)
-                                                          Text(dateStr, style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 12)),
-                                                      ],
-                                                    ),
+                                              child: InkWell(
+                                                onTap: () => _openReading(r),
+                                                borderRadius: BorderRadius.circular(12),
+                                                child: Padding(
+                                                  padding: const EdgeInsets.symmetric(vertical: 6),
+                                                  child: Row(
+                                                    crossAxisAlignment: CrossAxisAlignment.center,
+                                                    children: [
+                                                      Icon(_iconForType(r.type), color: const Color(0xFFF5C361), size: 20),
+                                                      const SizedBox(width: 10),
+                                                      Expanded(
+                                                        child: Column(
+                                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                                          children: [
+                                                            Text(r.title.isNotEmpty ? r.title : r.typeLabel, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
+                                                            if (dateStr != null)
+                                                              Text(dateStr, style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 12)),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                      const Icon(Icons.chevron_right, color: Colors.white54, size: 22),
+                                                    ],
                                                   ),
-                                                ],
+                                                ),
                                               ),
                                             );
                                           }).toList(),

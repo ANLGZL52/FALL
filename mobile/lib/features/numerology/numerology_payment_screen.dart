@@ -11,6 +11,7 @@ import '../../widgets/gradient_button.dart';
 import '../../widgets/mystic_scaffold.dart';
 
 import 'numerology_loading_screen.dart';
+import 'numerology_result_screen.dart';
 
 class NumerologyPaymentScreen extends StatefulWidget {
   final String readingId;
@@ -33,10 +34,9 @@ class NumerologyPaymentScreen extends StatefulWidget {
 class _NumerologyPaymentScreenState extends State<NumerologyPaymentScreen> {
   bool _loading = false;
   String? _lastPaymentId;
+  String _phase = 'idle';
 
   final String _sku = ProductCatalog.numerology299;
-
-  // ✅ Debug modda da store IAP test etmek istersen true yap
   static const bool debugUseStoreIap = false;
 
   Future<void> _goLoading() async {
@@ -51,17 +51,42 @@ class _NumerologyPaymentScreenState extends State<NumerologyPaymentScreen> {
     );
   }
 
+  Future<void> _goToResult() async {
+    if (!mounted) return;
+    final deviceId = await DeviceIdService.getOrCreate();
+    final r = await NumerologyApi.get(readingId: widget.readingId, deviceId: deviceId);
+    final resultText = (r.resultText ?? '').trim();
+    if (resultText.isNotEmpty && mounted) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => NumerologyResultScreen(
+            title: (r.topic ?? 'Numeroloji').trim().isEmpty ? 'Numeroloji' : (r.topic ?? 'Numeroloji').trim(),
+            resultText: resultText,
+          ),
+        ),
+      );
+    } else {
+      await _goLoading();
+    }
+  }
+
   Future<void> _payAndContinue() async {
     if (_loading) return;
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _phase = 'preparing';
+    });
 
     try {
       final deviceId = await DeviceIdService.getOrCreate();
 
+      await NumerologyApi.generate(readingId: widget.readingId, deviceId: deviceId);
+      if (!mounted) return;
+      setState(() => _phase = 'paying');
+
       final shouldUseIap = kReleaseMode || debugUseStoreIap;
 
       if (shouldUseIap) {
-        // ✅ GERÇEK ÖDEME
         final verify = await IapService.instance.buyAndVerify(
           readingId: widget.readingId,
           sku: _sku,
@@ -73,7 +98,6 @@ class _NumerologyPaymentScreenState extends State<NumerologyPaymentScreen> {
 
         if (mounted) setState(() => _lastPaymentId = verify.paymentId);
       } else {
-        // ✅ DEBUG: Para harcamadan paid işaretle (backend sadece TEST-... kabul eder)
         final ref = "TEST-${DateTime.now().millisecondsSinceEpoch}";
         await NumerologyApi.markPaid(
           readingId: widget.readingId,
@@ -83,14 +107,17 @@ class _NumerologyPaymentScreenState extends State<NumerologyPaymentScreen> {
         if (mounted) setState(() => _lastPaymentId = ref);
       }
 
-      await _goLoading();
+      await _goToResult();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Ödeme hatası: $e')),
       );
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() {
+        _loading = false;
+        _phase = 'idle';
+      });
     }
   }
 
@@ -149,9 +176,20 @@ class _NumerologyPaymentScreenState extends State<NumerologyPaymentScreen> {
                 ],
               ),
             ),
+            if (_phase == 'preparing')
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Yorumunuz hazırlanıyor, lütfen bekleyin...',
+                  style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 13),
+                  textAlign: TextAlign.center,
+                ),
+              ),
             const Spacer(),
             GradientButton(
-              text: _loading ? 'İşleniyor...' : 'Ödemeyi Başlat → Analizi Gör',
+              text: _loading
+                  ? (_phase == 'preparing' ? 'Yorumunuz hazırlanıyor...' : 'Ödeme işleniyor...')
+                  : 'Ödemeyi Başlat → Analizi Gör',
               onPressed: _loading ? null : _payAndContinue,
             ),
           ],
