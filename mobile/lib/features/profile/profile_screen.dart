@@ -473,6 +473,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                             final dateStr = r.createdAt != null
                                                 ? "${r.createdAt!.day}.${r.createdAt!.month}.${r.createdAt!.year}"
                                                 : null;
+                                            const previewLen = 120;
+                                            final preview = r.resultText != null && r.resultText!.isNotEmpty
+                                                ? (r.resultText!.length <= previewLen
+                                                    ? r.resultText!
+                                                    : '${r.resultText!.substring(0, previewLen)}...')
+                                                : null;
                                             return Padding(
                                               padding: const EdgeInsets.only(bottom: 10),
                                               child: InkWell(
@@ -481,7 +487,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                                 child: Padding(
                                                   padding: const EdgeInsets.symmetric(vertical: 6),
                                                   child: Row(
-                                                    crossAxisAlignment: CrossAxisAlignment.center,
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
                                                     children: [
                                                       Icon(_iconForType(r.type), color: const Color(0xFFF5C361), size: 20),
                                                       const SizedBox(width: 10),
@@ -492,6 +498,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                                             Text(r.title.isNotEmpty ? r.title : r.typeLabel, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
                                                             if (dateStr != null)
                                                               Text(dateStr, style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 12)),
+                                                            if (preview != null) ...[
+                                                              const SizedBox(height: 6),
+                                                              Text(preview, style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 12, height: 1.35), maxLines: 3, overflow: TextOverflow.ellipsis),
+                                                            ],
                                                           ],
                                                         ),
                                                       ),

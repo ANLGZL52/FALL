@@ -213,6 +213,58 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  void _openReadingContent(ProfileReadingItem r) {
+    final dateStr = r.createdAt != null
+        ? "${r.createdAt!.day}.${r.createdAt!.month}.${r.createdAt!.year}"
+        : null;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (ctx) => Scaffold(
+          backgroundColor: const Color(0xFF1a0a2e),
+          appBar: AppBar(
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back, color: Colors.white),
+              onPressed: () => Navigator.pop(ctx),
+            ),
+            title: Text(
+              r.title.isNotEmpty ? r.title : r.typeLabel,
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 18),
+            ),
+          ),
+          body: SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (dateStr != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: Text(dateStr, style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 14)),
+                    ),
+                  if (r.resultText != null && r.resultText!.isNotEmpty)
+                    Text(
+                      r.resultText!,
+                      style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: 15, height: 1.5),
+                    )
+                  else
+                    Text(
+                      r.isPaid
+                          ? "Yorumunuz yüklenemedi."
+                          : "Bu okuma için ödeme yapıldıktan sonra yorumunuz burada görünecek.",
+                      style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 14, fontStyle: FontStyle.italic),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _card({required String title, required Widget child}) {
     return Container(
       width: double.infinity,
@@ -449,24 +501,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                             final dateStr = r.createdAt != null
                                                 ? "${r.createdAt!.day}.${r.createdAt!.month}.${r.createdAt!.year}"
                                                 : null;
-                                            return Padding(
-                                              padding: const EdgeInsets.only(bottom: 10),
-                                              child: Row(
-                                                crossAxisAlignment: CrossAxisAlignment.center,
-                                                children: [
-                                                  Icon(_iconForType(r.type), color: const Color(0xFFF5C361), size: 20),
-                                                  const SizedBox(width: 10),
-                                                  Expanded(
-                                                    child: Column(
-                                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                                      children: [
-                                                        Text(r.title.isNotEmpty ? r.title : r.typeLabel, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
-                                                        if (dateStr != null)
-                                                          Text(dateStr, style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 12)),
-                                                      ],
+                                            const previewLen = 120;
+                                            final preview = r.resultText != null && r.resultText!.isNotEmpty
+                                                ? (r.resultText!.length <= previewLen
+                                                    ? r.resultText!
+                                                    : '${r.resultText!.substring(0, previewLen)}...')
+                                                : null;
+                                            return InkWell(
+                                              onTap: () => _openReadingContent(r),
+                                              borderRadius: BorderRadius.circular(12),
+                                              child: Padding(
+                                                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+                                                child: Row(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Icon(_iconForType(r.type), color: const Color(0xFFF5C361), size: 20),
+                                                    const SizedBox(width: 10),
+                                                    Expanded(
+                                                      child: Column(
+                                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                                        children: [
+                                                          Text(r.title.isNotEmpty ? r.title : r.typeLabel, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
+                                                          if (dateStr != null)
+                                                            Text(dateStr, style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 12)),
+                                                          if (preview != null) ...[
+                                                            const SizedBox(height: 6),
+                                                            Text(preview, style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 12, height: 1.35), maxLines: 3, overflow: TextOverflow.ellipsis),
+                                                          ],
+                                                        ],
+                                                      ),
                                                     ),
-                                                  ),
-                                                ],
+                                                    const Icon(Icons.chevron_right, color: Colors.white54, size: 22),
+                                                  ],
+                                                ),
                                               ),
                                             );
                                           }).toList(),

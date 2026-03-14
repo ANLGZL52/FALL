@@ -55,6 +55,8 @@ class ProfileReadingItem {
   final String status;
   final bool isPaid;
   final DateTime? createdAt;
+  /// Ödenmiş okumalarda yorum metni (profilde gösterilir)
+  final String? resultText;
 
   ProfileReadingItem({
     required this.type,
@@ -63,6 +65,7 @@ class ProfileReadingItem {
     required this.status,
     required this.isPaid,
     this.createdAt,
+    this.resultText,
   });
 
   factory ProfileReadingItem.fromJson(Map<String, dynamic> json) {
@@ -73,6 +76,10 @@ class ProfileReadingItem {
         createdAt = DateTime.tryParse(raw);
       }
     }
+    final rt = json['result_text'];
+    final resultText = (rt != null && rt.toString().trim().isNotEmpty)
+        ? rt.toString().trim()
+        : null;
     return ProfileReadingItem(
       type: (json['type'] ?? '').toString(),
       id: (json['id'] ?? '').toString(),
@@ -80,6 +87,7 @@ class ProfileReadingItem {
       status: (json['status'] ?? '').toString(),
       isPaid: json['is_paid'] == true,
       createdAt: createdAt,
+      resultText: resultText,
     );
   }
 
