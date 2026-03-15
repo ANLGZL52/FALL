@@ -5,8 +5,11 @@ import '../../services/device_id_service.dart';
 import '../../services/profile_api.dart';
 import '../../services/profile_store.dart';
 import '../../widgets/mystic_scaffold.dart';
+import '../coffee/coffee_result_screen.dart';
 import '../hand/hand_result_screen.dart';
+import '../numerology/numerology_result_screen.dart';
 import '../personality/personality_result_screen.dart';
+import '../synastry/synastry_result_screen.dart';
 import 'profile_legal_screen.dart';
 import 'reading_detail_loader_screen.dart';
 
@@ -118,6 +121,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   void _openReading(ProfileReadingItem r) {
     if (r.id.trim().isEmpty) return;
+    // Profilde result_text varsa direkt sonuç ekranına git (detail API boş dönse bile açılsın)
+    final text = (r.resultText ?? '').trim();
+    if (text.isNotEmpty) {
+      if (r.type == 'coffee') {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => CoffeeResultScreen(resultText: text)),
+        );
+        return;
+      }
+      if (r.type == 'numerology') {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => NumerologyResultScreen(
+              title: r.title.isNotEmpty ? r.title : r.typeLabel,
+              resultText: text,
+            ),
+          ),
+        );
+        return;
+      }
+      if (r.type == 'synastry') {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => SynastryResultScreen(readingId: r.id, resultText: text),
+          ),
+        );
+        return;
+      }
+    }
     if (r.type == 'hand') {
       Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => HandResultScreen(readingId: r.id)),
@@ -132,7 +164,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => ReadingDetailLoaderScreen(readingId: r.id, type: r.type),
+        builder: (_) => ReadingDetailLoaderScreen(
+          readingId: r.id,
+          type: r.type,
+          prefetchedResultText: text.isNotEmpty ? text : null,
+        ),
       ),
     );
   }

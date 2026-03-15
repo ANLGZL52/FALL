@@ -7,6 +7,7 @@ import '../../services/numerology_api.dart';
 import '../../services/synastry_api.dart';
 import '../../services/tarot_api.dart';
 
+import '../../models/birthchart_reading.dart';
 import '../birthchart/birthchart_result_screen.dart';
 import '../coffee/coffee_result_screen.dart';
 import '../numerology/numerology_result_screen.dart';
@@ -21,11 +22,14 @@ import '../../widgets/mystic_scaffold.dart';
 class ReadingDetailLoaderScreen extends StatefulWidget {
   final String readingId;
   final String type;
+  /// Profilde zaten varsa, API boş dönse bile bunu kullan
+  final String? prefetchedResultText;
 
   const ReadingDetailLoaderScreen({
     super.key,
     required this.readingId,
     required this.type,
+    this.prefetchedResultText,
   });
 
   @override
@@ -96,7 +100,10 @@ class _ReadingDetailLoaderScreenState extends State<ReadingDetailLoaderScreen> {
 
   Future<void> _openCoffee(String deviceId) async {
     final d = await CoffeeApi.detailRaw(readingId: widget.readingId, deviceId: deviceId);
-    final text = ((d['comment'] ?? d['result_text']) ?? '').toString().trim();
+    var text = ((d['comment'] ?? d['result_text']) ?? '').toString().trim();
+    if (text.isEmpty && (widget.prefetchedResultText ?? '').trim().isNotEmpty) {
+      text = widget.prefetchedResultText!.trim();
+    }
     if (text.isEmpty) {
       _showError('Bu okuma henüz hazır değil.');
       return;
@@ -109,7 +116,10 @@ class _ReadingDetailLoaderScreenState extends State<ReadingDetailLoaderScreen> {
 
   Future<void> _openTarot(String deviceId) async {
     final d = await TarotApi.detail(readingId: widget.readingId, deviceId: deviceId);
-    final resultText = (d['result_text'] ?? '').toString().trim();
+    var resultText = (d['result_text'] ?? '').toString().trim();
+    if (resultText.isEmpty && (widget.prefetchedResultText ?? '').trim().isNotEmpty) {
+      resultText = widget.prefetchedResultText!.trim();
+    }
     if (resultText.isEmpty) {
       _showError('Bu okuma henüz hazır değil.');
       return;
@@ -141,7 +151,10 @@ class _ReadingDetailLoaderScreenState extends State<ReadingDetailLoaderScreen> {
 
   Future<void> _openNumerology(String deviceId) async {
     final r = await NumerologyApi.get(readingId: widget.readingId, deviceId: deviceId);
-    final resultText = (r.resultText ?? '').trim();
+    var resultText = (r.resultText ?? '').trim();
+    if (resultText.isEmpty && (widget.prefetchedResultText ?? '').trim().isNotEmpty) {
+      resultText = widget.prefetchedResultText!.trim();
+    }
     if (resultText.isEmpty) {
       _showError('Bu okuma henüz hazır değil.');
       return;
@@ -160,6 +173,29 @@ class _ReadingDetailLoaderScreenState extends State<ReadingDetailLoaderScreen> {
 
   Future<void> _openBirthChart(String deviceId) async {
     final reading = await BirthChartApi.detail(readingId: widget.readingId, deviceId: deviceId);
+    final hasResult = (reading.resultText ?? '').trim().isNotEmpty;
+    final hasPrefetched = (widget.prefetchedResultText ?? '').trim().isNotEmpty;
+    if (!hasResult && hasPrefetched) {
+      final fallback = BirthChartReading(
+        id: reading.id,
+        topic: reading.topic,
+        question: reading.question,
+        name: reading.name,
+        birthDate: reading.birthDate,
+        birthTime: reading.birthTime,
+        birthCity: reading.birthCity,
+        birthCountry: reading.birthCountry,
+        status: reading.status,
+        resultText: widget.prefetchedResultText!.trim(),
+        isPaid: reading.isPaid,
+        paymentRef: reading.paymentRef,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => BirthChartResultScreen(reading: fallback)),
+      );
+      return;
+    }
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => BirthChartResultScreen(reading: reading)),
@@ -169,7 +205,10 @@ class _ReadingDetailLoaderScreenState extends State<ReadingDetailLoaderScreen> {
   Future<void> _openSynastry(String deviceId) async {
     final api = SynastryApi();
     final status = await api.getStatus(widget.readingId, deviceId: deviceId);
-    final resultText = (status.resultText ?? '').trim();
+    var resultText = (status.resultText ?? '').trim();
+    if (resultText.isEmpty && (widget.prefetchedResultText ?? '').trim().isNotEmpty) {
+      resultText = widget.prefetchedResultText!.trim();
+    }
     if (resultText.isEmpty) {
       _showError('Bu okuma henüz hazır değil.');
       return;
