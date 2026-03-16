@@ -5,6 +5,7 @@ import 'package:lunaura/services/device_id_service.dart';
 import 'package:lunaura/services/numerology_api.dart';
 import 'package:lunaura/models/numerology_reading.dart';
 import 'package:lunaura/features/numerology/numerology_result_screen.dart';
+import 'package:lunaura/features/numerology/numerology_payment_screen.dart';
 import 'package:lunaura/features/profile/profile_screen.dart';
 
 class NumerologyLoadingScreen extends StatefulWidget {

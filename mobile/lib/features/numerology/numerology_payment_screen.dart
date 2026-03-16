@@ -6,11 +6,12 @@ import '../../services/iap_service.dart';
 import '../../services/product_catalog.dart';
 import '../../services/numerology_api.dart';
 
+import '../../models/numerology_reading.dart';
 import '../../widgets/glass_card.dart';
 import '../../widgets/gradient_button.dart';
 import '../../widgets/mystic_scaffold.dart';
 
-import 'numerology_loading_screen.dart';
+import 'numerology_result_screen.dart';
 
 class NumerologyPaymentScreen extends StatefulWidget {
   final String readingId;
@@ -107,7 +108,7 @@ class _NumerologyPaymentScreenState extends State<NumerologyPaymentScreen> {
         MaterialPageRoute(
           builder: (_) => NumerologyResultScreen(
             title: widget.question.isNotEmpty ? widget.question : 'Nümeroloji',
-            resultText: finalReading.resultText ?? '',
+            resultText: finalReading!.resultText ?? '',
           ),
         ),
         (route) => false,
