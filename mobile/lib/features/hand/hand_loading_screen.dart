@@ -5,7 +5,7 @@ import '../../services/device_id_service.dart';
 import '../../services/hand_api.dart';
 import '../../widgets/glass_card.dart';
 import '../../widgets/mystic_scaffold.dart';
-import '../home/home_screen.dart';
+import '../profile/profile_screen.dart';
 import 'hand_result_screen.dart';
 
 class HandLoadingScreen extends StatefulWidget {
@@ -142,12 +142,12 @@ class _HandLoadingScreenState extends State<HandLoadingScreen> {
 
       final msg = _extractUserMessage(e);
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg)),
-      );
-
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
+        MaterialPageRoute(
+          builder: (_) => const ProfileScreen(
+            openWithMessage: "Yorumunuz arka planda hazırlanıyor. 'Benim Okumalarım' listesinde görünecek; aşağı çekerek yenileyebilirsiniz.",
+          ),
+        ),
         (route) => false,
       );
     }

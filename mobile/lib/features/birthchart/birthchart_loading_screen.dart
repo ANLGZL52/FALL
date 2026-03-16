@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../services/birthchart_api.dart';
 import '../../services/device_id_service.dart';
 import '../../widgets/mystic_scaffold.dart';
+import '../profile/profile_screen.dart';
 import 'birthchart_result_screen.dart';
 
 class BirthChartLoadingScreen extends StatefulWidget {
@@ -62,6 +63,18 @@ class _BirthChartLoadingScreenState extends State<BirthChartLoadingScreen> {
     return "Bir hata oluştu:\n$s";
   }
 
+  void _goToProfileWithMessage() {
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (_) => const ProfileScreen(
+          openWithMessage: "Yorumunuz arka planda hazırlanıyor. 'Benim Okumalarım' listesinde görünecek; aşağı çekerek yenileyebilirsiniz.",
+        ),
+      ),
+      (route) => false,
+    );
+  }
+
   Future<void> _run() async {
     if (_running) return;
     _running = true;
@@ -97,6 +110,16 @@ class _BirthChartLoadingScreenState extends State<BirthChartLoadingScreen> {
 
           if (!mounted) return;
 
+          final text = (reading.resultText ?? '').trim();
+          if (text.isEmpty) {
+            if (i < maxTry) {
+              await Future.delayed(Duration(milliseconds: baseDelayMs * i));
+              continue;
+            }
+            if (mounted) _goToProfileWithMessage();
+            return;
+          }
+
           Navigator.of(context).pushAndRemoveUntil(
             MaterialPageRoute(builder: (_) => BirthChartResultScreen(reading: reading)),
             (route) => false,
@@ -123,19 +146,13 @@ class _BirthChartLoadingScreenState extends State<BirthChartLoadingScreen> {
             continue;
           }
 
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(_prettyError(e)), behavior: SnackBarBehavior.floating),
-          );
-          Navigator.of(context).pop();
+          _goToProfileWithMessage();
           return;
         }
       }
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Yorum hazırlanamadı. Lütfen tekrar deneyin."), behavior: SnackBarBehavior.floating),
-      );
-      Navigator.of(context).pop();
+      _goToProfileWithMessage();
     } finally {
       _running = false;
     }

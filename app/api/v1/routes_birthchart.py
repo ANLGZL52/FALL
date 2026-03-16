@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from sqlmodel import Session
 
 from app.db import get_session
+from app.core.device import get_device_id
 from app.schemas.birthchart import BirthChartStartRequest
 from app.repositories.birthchart_repo import birthchart_repo
 from app.services.birthchart_service import generate_birthchart_reading
@@ -88,6 +89,7 @@ def detail(
 def generate(
     reading_id: str,
     session: Session = Depends(get_session),
+    device_id: str = Depends(get_device_id),
 ):
     reading = birthchart_repo.get(session=session, reading_id=reading_id)
     if not reading:
@@ -106,9 +108,12 @@ def generate(
         fixed = birthchart_repo.set_status(session=session, reading_id=reading_id, status="done")
         return _mask_result_if_unpaid(fixed or reading)
 
-    # ✅ processing ise tekrar üretme
+    # ✅ processing: Başka bir istek zaten yorum üretiyor; boş reading dönme, 409 ver ki istemci tekrar denesin.
     if status == "processing":
-        return _mask_result_if_unpaid(reading)
+        raise HTTPException(
+            status_code=409,
+            detail="Yorum hazırlanıyor, lütfen bekleyin.",
+        )
 
     # ✅ production generate
     birthchart_repo.set_status(session=session, reading_id=reading_id, status="processing")
@@ -123,9 +128,22 @@ def generate(
             topic=reading.get("topic") or "genel",
             question=reading.get("question"),
         )
-        updated = birthchart_repo.set_result(session=session, reading_id=reading_id, result_text=result_text)
+        if not (result_text or "").strip():
+            birthchart_repo.set_status(session=session, reading_id=reading_id, status="paid")
+            raise HTTPException(
+                status_code=500,
+                detail="Doğum haritası yorumu boş döndü. Lütfen tekrar deneyin.",
+            )
+        updated = birthchart_repo.set_result(session=session, reading_id=reading_id, result_text=result_text.strip())
+        try:
+            from app.services.fcm_service import send_reading_ready_notification
+            send_reading_ready_notification(device_id)
+        except Exception:
+            pass
         return _mask_result_if_unpaid(updated)
 
+    except HTTPException:
+        raise
     except Exception as e:
         birthchart_repo.set_status(session=session, reading_id=reading_id, status="paid")
         raise HTTPException(status_code=500, detail=f"Doğum haritası yorum üretilemedi: {e}")

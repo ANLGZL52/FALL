@@ -197,6 +197,12 @@ def generate(
         except Exception:
             pass
 
+        try:
+            from app.services.fcm_service import send_reading_ready_notification
+            send_reading_ready_notification(device_id)
+        except Exception:
+            pass
+
         return _mask_result_if_unpaid(updated)
 
     except HTTPException:

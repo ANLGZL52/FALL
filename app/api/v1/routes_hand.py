@@ -235,6 +235,11 @@ async def generate(
             raise HTTPException(status_code=500, detail="Yorum üretilemedi (boş sonuç).")
 
         r2 = set_status(session, reading_id, "completed", comment=comment)
+        try:
+            from app.services.fcm_service import send_reading_ready_notification
+            send_reading_ready_notification(device_id)
+        except Exception:
+            pass
         return _to_schema(r2)
 
     except HTTPException:

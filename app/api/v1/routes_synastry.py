@@ -116,6 +116,13 @@ def generate(reading_id: str, session: Session = Depends(get_session)):
             question=reading.get("question"),
         )
         updated = synastry_repo.set_result(session=session, reading_id=reading_id, result_text=result_text)
+        did = (reading.get("device_id") or "").strip()
+        if did:
+            try:
+                from app.services.fcm_service import send_reading_ready_notification
+                send_reading_ready_notification(did)
+            except Exception:
+                pass
         return _mask_result_if_unpaid(updated)
     except Exception as e:
         synastry_repo.set_status(session=session, reading_id=reading_id, status="paid")

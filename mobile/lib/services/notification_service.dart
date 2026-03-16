@@ -41,6 +41,11 @@ class NotificationService {
 
   static Future<void> init() async {
     if (_initialized) return;
+    // Web'de FCM/local notifications mobil gibi çalışmaz; uygulama çökmesin diye atla.
+    if (kIsWeb) {
+      _initialized = true;
+      return;
+    }
     try {
       await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
       FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
@@ -150,6 +155,7 @@ class NotificationService {
 
   /// İzin henüz verilmemiş ve dialog daha önce gösterilmediyse true.
   static Future<bool> shouldShowNotificationPrompt() async {
+    if (kIsWeb) return false;
     try {
       final prefs = await SharedPreferences.getInstance();
       if (prefs.getBool(_keyPromptShown) == true) return false;

@@ -7,8 +7,8 @@ import '../../services/device_id_service.dart';
 import '../../widgets/glass_card.dart';
 import '../../widgets/mystic_scaffold.dart';
 
+import '../profile/profile_screen.dart';
 import 'coffee_result_screen.dart';
-import '../home/home_screen.dart';
 
 class CoffeeLoadingScreen extends StatefulWidget {
   final String readingId;
@@ -162,13 +162,14 @@ class _CoffeeLoadingScreenState extends State<CoffeeLoadingScreen> {
     }
   }
 
-  Future<void> _goHomeWithToast() async {
+  Future<void> _goToProfileWithMessage() async {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Yorum üretilemedi. Ana sayfaya dönüldü.')),
-    );
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => HomeScreen()),
+      MaterialPageRoute(
+        builder: (_) => const ProfileScreen(
+          openWithMessage: "Yorumunuz arka planda hazırlanıyor. 'Benim Okumalarım' listesinde görünecek; aşağı çekerek yenileyebilirsiniz.",
+        ),
+      ),
       (route) => false,
     );
   }
@@ -216,7 +217,7 @@ class _CoffeeLoadingScreenState extends State<CoffeeLoadingScreen> {
                       style: TextStyle(color: Colors.white.withOpacity(0.75), height: 1.25),
                     ),
                     const SizedBox(height: 16),
-                    if (_error)
+                    if (_error) ...[
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton(
@@ -230,6 +231,15 @@ class _CoffeeLoadingScreenState extends State<CoffeeLoadingScreen> {
                           child: const Text('Tekrar Dene'),
                         ),
                       ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton(
+                          onPressed: _goToProfileWithMessage,
+                          child: const Text('Benim Okumalarım\'a Git'),
+                        ),
+                      ),
+                    ],
                     if (!_error && hardWarn) ...[
                       SizedBox(
                         width: double.infinity,
@@ -242,8 +252,8 @@ class _CoffeeLoadingScreenState extends State<CoffeeLoadingScreen> {
                       SizedBox(
                         width: double.infinity,
                         child: OutlinedButton(
-                          onPressed: _goHomeWithToast,
-                          child: const Text('Ana Sayfa'),
+                          onPressed: _goToProfileWithMessage,
+                          child: const Text('Benim Okumalarım\'a Git'),
                         ),
                       ),
                     ],

@@ -15,7 +15,10 @@ import 'profile_legal_screen.dart';
 import 'reading_detail_loader_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key});
+  /// Loading ekranından "yorum hazırlanıyor" ile yönlendirildiyse gösterilecek mesaj (SnackBar).
+  final String? openWithMessage;
+
+  const ProfileScreen({super.key, this.openWithMessage});
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -49,6 +52,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
     _boot();
+    if (widget.openWithMessage != null && widget.openWithMessage!.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _toast(widget.openWithMessage!);
+      });
+    }
 
     _nameCtrl.addListener(_markDirty);
     _birthDateCtrl.addListener(_markDirty);
@@ -99,7 +107,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     });
     try {
       final deviceId = await DeviceIdService.getOrCreate();
-      final res = await ProfileApi.getHistory(deviceId: deviceId, limit: 20);
+      final res = await ProfileApi.getHistory(deviceId: deviceId, limit: 5);
       if (!mounted) return;
       final newItems = res.items;
       final nowPending = <String>{};
@@ -548,7 +556,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                         )
                                       : Column(
                                           crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: _readings!.take(20).map((r) {
+                                          children: _readings!.take(5).map((r) {
                                             final dateStr = r.createdAt != null
                                                 ? "${r.createdAt!.day}.${r.createdAt!.month}.${r.createdAt!.year}"
                                                 : null;

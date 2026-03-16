@@ -235,6 +235,11 @@ async def generate(
             raise RuntimeError("Boş sonuç")
 
         r = set_status(session, reading_id, "completed", comment=text)
+        try:
+            from app.services.fcm_service import send_reading_ready_notification
+            send_reading_ready_notification(device_id)
+        except Exception:
+            pass
         return _to_schema(r)
 
     except AIInsufficientQuotaError:
