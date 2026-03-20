@@ -2,8 +2,8 @@ name: lunaura
 description: "A new Flutter project."
 publish_to: 'none'
 
-# 🔴 Play Store: build number 38
-version: 1.0.0+38
+# 🔴 Play Store: build number 39
+version: 1.0.0+39
 
 environment:
   sdk: ^3.9.2

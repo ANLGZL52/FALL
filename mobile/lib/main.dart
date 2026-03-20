@@ -4,6 +4,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:device_preview/device_preview.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'dart:async';
 
 import 'core/app_theme.dart';
 import 'features/home/home_screen.dart';
@@ -29,7 +30,6 @@ void main() async {
       options: DefaultFirebaseOptions.currentPlatform,
     );
   }
-  await NotificationService.init();
 
   runApp(
     DevicePreview(
@@ -54,6 +54,8 @@ class _FallAppState extends State<FallApp> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
+    // Bildirim başlatma akışı uygulama açılışını bloklamasın.
+    unawaited(NotificationService.init());
     NotificationService.onOpenReadingsRequested = _openReadingsFromNotification;
 
     // ✅ IAP "hazır mı?" kontrolü (debug log). Akışı bozmaz.
