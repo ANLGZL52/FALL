@@ -25,12 +25,6 @@ import 'firebase_options.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  if (!kIsWeb && Firebase.apps.isEmpty) {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
-  }
-
   runApp(
     DevicePreview(
       enabled: !kReleaseMode, // debug modda açık
@@ -49,13 +43,37 @@ class FallApp extends StatefulWidget {
 class _FallAppState extends State<FallApp> with WidgetsBindingObserver {
   final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
 
+  Future<void> _bootstrapCoreServices() async {
+    if (kIsWeb) return;
+
+    try {
+      if (Firebase.apps.isEmpty) {
+        await Firebase.initializeApp(
+          options: DefaultFirebaseOptions.currentPlatform,
+        ).timeout(const Duration(seconds: 12));
+      }
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('[Bootstrap] Firebase init skipped: $e\n$st');
+      }
+    }
+
+    try {
+      await NotificationService.init().timeout(const Duration(seconds: 12));
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('[Bootstrap] Notification init skipped: $e\n$st');
+      }
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // Bildirim başlatma akışı uygulama açılışını bloklamasın.
-    unawaited(NotificationService.init());
+    // Servis açılışları runApp'i asla bloklamasın.
+    unawaited(_bootstrapCoreServices());
     NotificationService.onOpenReadingsRequested = _openReadingsFromNotification;
 
     // ✅ IAP "hazır mı?" kontrolü (debug log). Akışı bozmaz.
