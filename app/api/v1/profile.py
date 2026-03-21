@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
+import os
 from datetime import datetime
 from typing import Optional, List, Literal, Dict, Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select, func
 
@@ -321,3 +323,60 @@ def history(
     items = items[offset : offset + limit]
 
     return ProfileHistoryResponse(device_id=device_id, items=items, limit=limit, offset=offset, type=None)
+
+
+# =========================================================
+# DELETE READING (cihaz sahibi)
+# =========================================================
+def _delete_local_files_from_images_json(images_json: Any) -> None:
+    try:
+        raw = images_json if isinstance(images_json, str) else "[]"
+        data = json.loads(raw or "[]")
+        if not isinstance(data, list):
+            return
+        for p in data:
+            if isinstance(p, str) and p:
+                try:
+                    if os.path.exists(p):
+                        os.remove(p)
+                except OSError:
+                    pass
+    except Exception:
+        pass
+
+
+@router.delete("/readings/{reading_type}/{reading_id}")
+def delete_reading(
+    reading_type: ReadingType,
+    reading_id: str,
+    device_id: str = Depends(get_device_id),
+    session: Session = Depends(get_session),
+):
+    """Kullanıcının kendi okumasını kalıcı olarak siler (kahve/el için diskteki foto path'leri de temizlenir)."""
+    model_map = {
+        "coffee": CoffeeReadingDB,
+        "hand": HandReadingDB,
+        "tarot": TarotReadingDB,
+        "numerology": NumerologyReadingDB,
+        "birthchart": BirthChartReadingDB,
+        "personality": PersonalityReadingDB,
+        "synastry": SynastryReadingDB,
+    }
+    model = model_map[reading_type]
+    stmt = select(model).where(model.id == reading_id)  # type: ignore[arg-type]
+    row = session.exec(stmt).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Okuma bulunamadı.")
+
+    rid = _safe_str(getattr(row, "device_id", "")).strip()
+    if rid and rid != device_id:
+        raise HTTPException(status_code=404, detail="Okuma bulunamadı.")
+
+    if reading_type == "coffee":
+        _delete_local_files_from_images_json(getattr(row, "images_json", "[]"))
+    elif reading_type == "hand":
+        _delete_local_files_from_images_json(getattr(row, "images_json", "[]"))
+
+    session.delete(row)
+    session.commit()
+    return {"ok": True, "id": reading_id, "type": reading_type}

@@ -1,6 +1,7 @@
 # app/api/v1/routes_numerology.py
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -89,6 +90,23 @@ def _mask_result_if_unpaid(obj: Any) -> Dict[str, Any]:
     if not d.get("is_paid"):
         d["result_text"] = None
     return d
+
+
+def _stale_processing_for_retry(d: Dict[str, Any], minutes: int = 10) -> bool:
+    """
+    Üretim sırasında sunucu kesilirse satır 'processing' + boş result'ta kalıyordu;
+    /generate her çağrıda erken dönüp yorumu sonsuza dek kilitleyebiliyordu.
+    Kayıt yeterince eskiyse yeniden üretime izin ver.
+    """
+    u = d.get("updated_at") or d.get("created_at")
+    if not isinstance(u, datetime):
+        return True
+    now = datetime.now(timezone.utc)
+    if u.tzinfo is None:
+        u_utc = u.replace(tzinfo=timezone.utc)
+    else:
+        u_utc = u.astimezone(timezone.utc)
+    return (now - u_utc) > timedelta(minutes=minutes)
 
 
 @router.post("/start", response_model=NumerologyReadingOut)
@@ -180,7 +198,7 @@ def generate(
 
     d = _require_owner(obj, device_id)
 
-    # Ödeme öncesi generate’e izin ver (yorum DB’de saklanır, _mask_result_if_unpaid ödenmemişse göstermez)
+    # Ödeme öncesi de generate çağrılabilir (yorum DB'de, _mask_result_if_unpaid ile gizlenir)
     status = (d.get("status") or "").lower().strip()
     result_text = (d.get("result_text") or "").strip()
 
@@ -188,7 +206,20 @@ def generate(
         return _mask_result_if_unpaid(obj)
 
     if status == "processing":
-        return _mask_result_if_unpaid(obj)
+        # result_text yoksa buradayız (üstte doluysa döndük)
+        if _stale_processing_for_retry(d, minutes=10):
+            # Ödenmişse tekrar üret; ödenmemişse processing tuzağından çıkar (ödeme akışına dönsün)
+            if bool(d.get("is_paid")):
+                _repo.set_status(session=session, reading_id=reading_id, status="paid")
+            else:
+                _repo.set_status(session=session, reading_id=reading_id, status="started")
+            obj = _repo.get(session=session, reading_id=reading_id) or obj
+            d = _as_dict(obj)
+            status = (d.get("status") or "").lower().strip()
+            if not bool(d.get("is_paid")) and status == "started":
+                return _mask_result_if_unpaid(obj)
+        else:
+            return _mask_result_if_unpaid(obj)
 
     if status not in ("paid", "processing", "completed"):
         _repo.set_status(session=session, reading_id=reading_id, status="paid")

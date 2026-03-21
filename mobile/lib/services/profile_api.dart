@@ -66,4 +66,27 @@ class ProfileApi {
     }
     return ProfileHistoryResponse.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
+
+  /// Okumayı kalıcı siler (cihaz sahibi doğrulaması sunucuda).
+  static Future<void> deleteReading({
+    required String deviceId,
+    required String type,
+    required String readingId,
+  }) async {
+    final t = type.trim().toLowerCase();
+    final id = readingId.trim();
+    if (t.isEmpty || id.isEmpty) {
+      throw Exception('deleteReading: type veya id boş');
+    }
+    final res = await http
+        .delete(
+          Uri.parse('${ApiBase.baseUrl}/profile/readings/$t/$id'),
+          headers: ApiBase.headers(deviceId: deviceId),
+        )
+        .timeout(const Duration(seconds: 25));
+
+    if (res.statusCode >= 400) {
+      throw Exception("profile/readings DELETE failed: ${res.statusCode} / ${_extractErrorMessage(res.body)}");
+    }
+  }
 }

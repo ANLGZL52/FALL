@@ -5,11 +5,13 @@ import '../../models/profile_models.dart';
 import '../../services/device_id_service.dart';
 import '../../services/profile_api.dart';
 import '../../services/profile_store.dart';
+import '../../services/profile_unlocked_slots_service.dart';
 import '../../widgets/mystic_scaffold.dart';
 import '../coffee/coffee_payment_screen.dart';
 import '../coffee/coffee_result_screen.dart';
 import '../hand/hand_payment_screen.dart';
 import '../hand/hand_result_screen.dart';
+import '../numerology/numerology_loading_screen.dart';
 import '../numerology/numerology_payment_screen.dart';
 import '../numerology/numerology_result_screen.dart';
 import '../personality/personality_payment_screen.dart';
@@ -54,6 +56,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Set<String> _pendingReadingIds = {};
   Timer? _pendingRefreshTimer;
 
+  /// Kilidi açılmış görünür sıra (en fazla 5; silince geçmişten doldurulmaz)
+  List<String> _unlockedVisibleIds = [];
+  String? _deletingReadingKey;
+
   bool _isReadyLockedOrDone(ProfileReadingItem r) {
     final s = r.status.toLowerCase().trim();
     return s == 'completed' || s == 'done' || s == 'ready_locked' || s == 'ready_unlocked';
@@ -61,6 +67,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   bool _hasResult(ProfileReadingItem r) {
     return r.hasResult || (r.resultText ?? '').trim().isNotEmpty || _isReadyLockedOrDone(r);
+  }
+
+  List<ProfileReadingItem> _pickActiveLockedItems(List<ProfileReadingItem> locked) {
+    // Her tür için tek "aktif" kayıt göster:
+    // 1) Hazır kilitli (hasResult=true) varsa onu,
+    // 2) yoksa en yeni hazırlanıyor kaydını.
+    final byType = <String, List<ProfileReadingItem>>{};
+    for (final r in locked) {
+      byType.putIfAbsent(r.type, () => <ProfileReadingItem>[]).add(r);
+    }
+
+    final picked = <ProfileReadingItem>[];
+    for (final group in byType.values) {
+      group.sort((a, b) {
+        final aReady = _hasResult(a) ? 1 : 0;
+        final bReady = _hasResult(b) ? 1 : 0;
+        if (aReady != bReady) return bReady.compareTo(aReady);
+        final ad = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final bd = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        return bd.compareTo(ad);
+      });
+      picked.add(group.first);
+    }
+
+    picked.sort((a, b) {
+      final ad = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final bd = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return bd.compareTo(ad);
+    });
+    return picked;
   }
 
   @override
@@ -94,6 +130,48 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  Future<void> _confirmDeleteReading(ProfileReadingItem r) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF2a1a32),
+        title: const Text('Okumayı sil?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+        content: Text(
+          '${r.typeLabel} kaydını kalıcı olarak silmek istiyor musun? Bu işlem geri alınamaz.',
+          style: TextStyle(color: Colors.white.withOpacity(0.88), height: 1.35),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Vazgeç', style: TextStyle(color: Colors.white.withOpacity(0.85))),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Sil', style: TextStyle(color: Colors.red.shade200, fontWeight: FontWeight.w800)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    final key = '${r.type}:${r.id}';
+    setState(() => _deletingReadingKey = key);
+    try {
+      final deviceId = await DeviceIdService.getOrCreate();
+      await ProfileApi.deleteReading(deviceId: deviceId, type: r.type, readingId: r.id);
+      if (r.isPaid) {
+        await ProfileUnlockedSlotsService.instance.removeVisibleId(r.id);
+      }
+      if (!mounted) return;
+      _toast('Okuma silindi');
+      await _loadReadings();
+    } catch (e) {
+      if (mounted) _toast('Silinemedi: $e');
+    } finally {
+      if (mounted) setState(() => _deletingReadingKey = null);
+    }
+  }
+
   Future<void> _boot() async {
     try {
       // ✅ local hızlı yükle + server sync
@@ -125,6 +203,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final res = await ProfileApi.getHistory(deviceId: deviceId, limit: 50);
       if (!mounted) return;
       final newItems = res.items;
+      final visibleUnlocked = await ProfileUnlockedSlotsService.instance.syncAfterHistoryFetch(newItems);
+      if (!mounted) return;
       final nowPending = <String>{};
       bool anyJustReady = false;
       for (final r in newItems) {
@@ -140,6 +220,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _readingsLoading = false;
         _readingsError = null;
         _pendingReadingIds = nowPending;
+        _unlockedVisibleIds = visibleUnlocked;
       });
       _startOrStopPendingRefresh();
       if (anyJustReady) {
@@ -213,7 +294,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
     if (r.type == 'numerology' && !hasResult) {
-      _toast("Numeroloji yorumun hazırlanıyor. Hazır olduğunda buradan açabileceksin.");
+      // Akış: önce üretim (Loading), sonra ödeme. Takılı kayıtlar /generate ile kurtarılır.
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => NumerologyLoadingScreen(
+            readingId: r.id,
+            title: r.title.isNotEmpty ? r.title : r.typeLabel,
+            name: '',
+            birthDate: '',
+            question: r.title,
+          ),
+        ),
+      );
       return;
     }
     if (r.type == 'hand' && hasResult && !r.isPaid) {
@@ -440,72 +532,90 @@ class _ProfileScreenState extends State<ProfileScreen> {
         : null;
     final waitingComment = !hasResult;
     final readyLocked = hasResult && !r.isPaid;
+    final delKey = '${r.type}:${r.id}';
+    final deleting = _deletingReadingKey == delKey;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      child: InkWell(
-        onTap: () => _openReading(r),
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(_iconForType(r.type), color: const Color(0xFFF5C361), size: 20),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: InkWell(
+              onTap: deleting ? null : () => _openReading(r),
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      r.title.isNotEmpty ? r.title : r.typeLabel,
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14),
-                    ),
-                    if (dateStr != null) Text(dateStr, style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 12)),
-                    if (waitingComment) ...[
-                      const SizedBox(height: 6),
-                      Row(
+                    Icon(_iconForType(r.type), color: const Color(0xFFF5C361), size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.amber.shade200),
+                          Text(
+                            r.title.isNotEmpty ? r.title : r.typeLabel,
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14),
                           ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Yorumunuz hazırlanıyor... Hazır olduğunda buradan ve bildirimle görebileceksiniz.',
-                              style: TextStyle(color: Colors.amber.shade200, fontSize: 12, height: 1.35, fontStyle: FontStyle.italic),
+                          if (dateStr != null) Text(dateStr, style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 12)),
+                          if (waitingComment) ...[
+                            const SizedBox(height: 6),
+                            Row(
+                              children: [
+                                SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.amber.shade200),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Yorumunuz hazırlanıyor... Hazır olduğunda buradan ve bildirimle görebileceksiniz. Takılı kaldıysa dokunarak yeniden deneyin.',
+                                    style: TextStyle(color: Colors.amber.shade200, fontSize: 12, height: 1.35, fontStyle: FontStyle.italic),
+                                    maxLines: 3,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ] else if (readyLocked) ...[
+                            const SizedBox(height: 6),
+                            Text(
+                              'Yorumunuz hazır. Kilidi açıp tamamını okuyabilirsiniz.',
+                              style: TextStyle(color: Colors.lightGreenAccent.shade100, fontSize: 12, height: 1.35, fontStyle: FontStyle.italic),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                             ),
-                          ),
+                          ] else if (preview != null) ...[
+                            const SizedBox(height: 6),
+                            Text(
+                              preview,
+                              style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 12, height: 1.35),
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
                         ],
                       ),
-                    ] else if (readyLocked) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        'Yorumunuz hazır. Kilidi açıp tamamını okuyabilirsiniz.',
-                        style: TextStyle(color: Colors.lightGreenAccent.shade100, fontSize: 12, height: 1.35, fontStyle: FontStyle.italic),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ] else if (preview != null) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        preview,
-                        style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 12, height: 1.35),
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
+                    ),
+                    const Icon(Icons.chevron_right, color: Colors.white54, size: 22),
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right, color: Colors.white54, size: 22),
-            ],
+            ),
           ),
-        ),
+          IconButton(
+            tooltip: 'Sil',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+            onPressed: deleting ? null : () => _confirmDeleteReading(r),
+            icon: deleting
+                ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.red.shade100))
+                : Icon(Icons.delete_outline, color: Colors.red.shade200, size: 22),
+          ),
+        ],
       ),
     );
   }
@@ -746,8 +856,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                       : Builder(
                                           builder: (_) {
                                             final all = _readings!;
-                                            final locked = all.where((r) => !r.isPaid).toList();
-                                            final unlocked = all.where((r) => r.isPaid).toList();
+                                            final lockedAll = all.where((r) => !r.isPaid).toList();
+                                            final locked = _pickActiveLockedItems(lockedAll);
+                                            final paidById = {for (final x in all.where((r) => r.isPaid)) x.id: x};
+                                            final unlocked = _unlockedVisibleIds
+                                                .map((id) => paidById[id])
+                                                .whereType<ProfileReadingItem>()
+                                                .toList();
                                             return Column(
                                               crossAxisAlignment: CrossAxisAlignment.start,
                                               children: [
@@ -769,7 +884,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                                   ...locked.map(_readingTile),
                                                 const SizedBox(height: 10),
                                                 Text(
-                                                  "Kilidi Açılmış (${unlocked.length})",
+                                                  "Kilidi Açılmış (en fazla 5, şu an ${unlocked.length})",
                                                   style: TextStyle(
                                                     color: Colors.lightGreenAccent.shade100,
                                                     fontSize: 13,
